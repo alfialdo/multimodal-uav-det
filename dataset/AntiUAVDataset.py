@@ -12,22 +12,8 @@ from ._helper import load_json, load_attributes, connect_sftp
 
 class AntiUAVDataset(Dataset):
     def __init__(self, root_dir, transform=None, remote=None, size=None):
+        self.data_set = os.path.basename(root_dir)
         self.remote = remote
-
-        # Initialize SFTP connection if using remote dataset
-        if self.remote:
-            self.client = connect_sftp(
-                host=os.getenv('DS_HOSTNAME'),
-                port=os.getenv('DS_PORT'),
-                user=os.getenv('DS_USERNAME'),
-                passw=os.getenv('DS_PASSWORD')
-            )
-            self.sftp = self.client.open_sftp()
-
-        else:
-            self.client = None
-            self.sftp = None
-        
         self.data = self.__load_data(root_dir)
         self.transform = transform
         self.size = size
@@ -50,22 +36,16 @@ class AntiUAVDataset(Dataset):
             img = transforms.ToTensor()(img)
 
         return dict(image=img, bbox=bbox, exist=torch.tensor(row.exist))
-    
-    def __del__(self):
-        if self.sftp:
-            self.sftp.close()
-        if self.client:
-            self.client.close()
-
 
     def __load_image(self, img_path):
 
         if self.remote:
-            with self.sftp.open(img_path, 'rb') as f:
-                img = f.read()
-                img = Image.open(io.BytesIO(img))
-                img.load()
-
+            with connect_sftp() as sftp:
+                with sftp.open(img_path, 'rb') as f:
+                    f.prefetch()
+                    img = f.read()
+                    img = Image.open(io.BytesIO(img))
+                    img.load()
         else:
             img = Image.open(img_path)
 
@@ -73,36 +53,41 @@ class AntiUAVDataset(Dataset):
         
     
     def __load_data(self, root_dir):
-        attr_dir = os.path.join(os.path.dirname(root_dir), 'label_new')
-        data_set = os.path.basename(root_dir)
+        df = []
 
-        df = dict(
-            cam_type=[],
-            img_path=[],
-            attribute=[],
-            gt_rect=[],
-            exist=[]
-        )
-        attr = load_attributes(attr_dir, remote_client=self.sftp)
-        list_dir = self.sftp.listdir if self.remote else os.listdir
+        if self.remote:
+            sftp = connect_sftp()
+            list_dir = sftp.listdir
+        else:
+            sftp = None
+            list_dir = os.listdir
+
+        attr_dir = os.path.join(os.path.dirname(root_dir), 'label_new')
+        attr = load_attributes(attr_dir, remote_client=sftp)
 
         for seq in list_dir(root_dir):
             seq_dir = os.path.join(root_dir, seq)
 
             for cam_type in ['visible', 'infrared']:
-                labels = load_json(os.path.join(seq_dir, f'{cam_type}.json'), remote_client=self.sftp)
-                img_dir = os.path.join(seq_dir, cam_type)
-                img_paths = sorted(list_dir(img_dir))
-                img_paths = [os.path.join(img_dir, x) for x in img_paths]
+                gt = load_json(os.path.join(seq_dir, f'{cam_type}.json'), remote_client=sftp)
+                total_frame = len(gt['gt_rect'])
 
-                df['cam_type'] += [cam_type] * len(img_paths)
-                df['img_path'] += img_paths
-                df['attribute'] += [attr[data_set][seq]] * len(img_paths)
-                df['gt_rect'] += labels['gt_rect']
-                df['exist'] += labels['exist']
+                img_dir = os.path.join(seq_dir, cam_type)
+                img_paths = [os.path.join(img_dir, f"{cam_type}-{str(i).zfill(4)}.jpg") for i in range(total_frame)]
                 
+                df.append(pd.DataFrame(dict(
+                    cam_type=[cam_type] * total_frame,
+                    attribute=[attr[self.data_set][seq]] * total_frame,
+                    img_path=img_paths,
+                    gt_rect=gt['gt_rect'],
+                    exist=gt['exist']
+                )))
+        
+        if self.remote:
+            sftp.close()
+
         # Filter images that not bounding box
-        df = pd.DataFrame(df)
+        df = pd.concat(df, ignore_index=True)
         df = df[df['exist'] == 1].reset_index(drop=True)
 
         return df

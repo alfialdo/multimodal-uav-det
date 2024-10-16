@@ -1,4 +1,5 @@
 import os
+import io
 import json
 import paramiko
 from dotenv import load_dotenv
@@ -23,8 +24,10 @@ def load_json(path, remote_client=None):
     depending on whether a remote_client is provided.
     """
     if remote_client:
-        with remote_client.open(path, 'r') as f:
-            data = json.load(f)
+        with remote_client.open(path, 'rb') as f:
+            f.prefetch()
+            data = f.read()
+            data = json.load(io.BytesIO(data))
     else:
         with open(path, 'r') as f:
             data = json.load(f)
@@ -72,7 +75,7 @@ def load_attributes(path, remote_client=None):
     return temp
 
 
-def connect_sftp(host, port, user, passw):
+def connect_sftp():
     """
     Establish an SFTP connection using the provided credentials.
 
@@ -90,13 +93,14 @@ def connect_sftp(host, port, user, passw):
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     client.connect(
-        hostname=host,
-        port=port,
-        username=user,
-        password=passw
+        hostname=os.getenv('SFTP_HOST'),
+        port=os.getenv('SFTP_PORT'),
+        username=os.getenv('SFTP_USERNAME'),
+        password=os.getenv('SFTP_PASSWORD')
     )
+    sftp_client = client.open_sftp()
 
-    return client
+    return sftp_client
 
 
 
@@ -136,25 +140,26 @@ def plot_sample_data(dataloader):
     axes = axes.flatten()
 
     # Sample 4 random images from the dataloader
-    for i, ax in enumerate(axes):
-        sample = next(iter(dataloader))
-        image = sample['image'].squeeze(0).permute(1, 2, 0).numpy()
-        bbox = sample['bbox'].squeeze(0).numpy()
+    for i, sample in enumerate(dataloader):
+        if i >= 4:  # We only want to plot 4 images
+            break
+        
+        image = sample['image'][0].permute(1, 2, 0).numpy()
+        bbox = sample['bbox'][0].numpy()
 
         # Convert bbox from [x, y, w, h] to [x1, y1, x2, y2]
         x, y, w, h = bbox
 
         # Draw the image
-        ax.imshow(image)
+        axes[i].imshow(image)
 
         # Draw the bounding box
         rect = plt.Rectangle((int(x), int(y)), int(w), int(h), fill=False, edgecolor='cyan', linewidth=3)
-        ax.add_patch(rect)
+        axes[i].add_patch(rect)
 
-        ax.set_title(f"Sample {i+1}")
-        ax.axis('off')
+        axes[i].set_title(f"Sample {i+1}")
+        axes[i].axis('off')
 
     plt.tight_layout()
     plt.show()
-    
 
