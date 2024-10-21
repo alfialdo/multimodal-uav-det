@@ -10,6 +10,7 @@ import io
 from ._helper import load_json, load_attributes, connect_sftp
 
 
+# TODO: to apply Mosaics and Random Affine transform for image and bbox
 class AntiUAVDataset(Dataset):
     def __init__(self, root_dir, transform=None, remote=None, size=None):
         self.data_set = os.path.basename(root_dir)

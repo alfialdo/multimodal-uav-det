@@ -1,13 +1,13 @@
 import torch
 from torch import nn
 from torch.nn import functional as F
+import pytorch_lightning as pl
 
 import einops
+from utils.datatype import DetectionResults
 
-from dataset.datatype import DetectionResults
 
-
-class ConvModule(nn.Module):
+class ConvModule(pl.LightningModule):
     def __init__(self, in_channels, out_channels, kernel_size=(1,1), stride=(1,1), padding=0, bias=False, eps=1e-3, momentum=0.03, activation='silu'):
         super().__init__()
         self.conv = nn.Sequential(
@@ -20,7 +20,7 @@ class ConvModule(nn.Module):
         return self.conv(x)
 
 
-class StemLayer(nn.Module):
+class StemLayer(pl.LightningModule):
     def __init__(self, in_channels, out_channels):
         super().__init__()
         self.conv = ConvModule(in_channels, out_channels, kernel_size=(6,6), stride=(2,2), padding=(2,2), bias=False)
@@ -30,7 +30,7 @@ class StemLayer(nn.Module):
         x = self.conv(x)
         return x
 
-class MDyConv(nn.Module):
+class MDyConv(pl.LightningModule):
     def __init__(self, in_channels, attention_out_c, dy_kernel_size=3, dy_padding=1, dy_channel_size=None):
         super().__init__()
         if dy_channel_size:
@@ -90,7 +90,7 @@ class MDyConv(nn.Module):
 
 
 # Backbone layer
-class MDyCSPModule(nn.Module):
+class MDyCSPModule(pl.LightningModule):
     def __init__(self, in_channels, out_channels, reduction_ratio=2, dy_channel_size=None):
         super().__init__()
         
@@ -131,7 +131,7 @@ class MDyCSPModule(nn.Module):
 
 
 # Neck layer
-class MDyEncoder(nn.Module):
+class MDyEncoder(pl.LightningModule):
     def __init__(self, in_channels, out_channels):
         super().__init__()
         self.group_norm_in = nn.GroupNorm(num_groups=1, num_channels=in_channels, eps=1e-5, affine=True)
@@ -173,7 +173,7 @@ class MDyEncoder(nn.Module):
 
         return x
 
-class MFDFEncoderModule(nn.Module):
+class MFDFEncoderModule(pl.LightningModule):
     def __init__(self, x1_c_in, x2_c_in):
         super().__init__()
         encoder_x1_out_c = x1_c_in
@@ -205,7 +205,7 @@ class MFDFEncoderModule(nn.Module):
         return x1, x2
 
 # Head layer
-class ObjectnessHead(nn.Module):
+class ObjectnessHead(pl.LightningModule):
     def __init__(self, in_channels, n_anchors):
         super().__init__()
         predict_c = n_anchors * 1
@@ -221,7 +221,7 @@ class ObjectnessHead(nn.Module):
 
         return x
     
-class BBoxHead(nn.Module):
+class BBoxHead(pl.LightningModule):
     def __init__(self, in_channels, n_anchors):
         super().__init__()
         predict_c = n_anchors * 4
@@ -238,7 +238,7 @@ class BBoxHead(nn.Module):
         return x
     
 
-class RTMHead(nn.Module):
+class RTMHead(pl.LightningModule):
     def __init__(self, x_c_in:list, n_anchors):
         super().__init__()
 
@@ -263,7 +263,7 @@ class RTMHead(nn.Module):
         return outs
 
 
-class RTMUAVDet(nn.Module):
+class RTMUAVDet(pl.LightningModule):
     def __init__(self, img_channels):
         super().__init__()
 
