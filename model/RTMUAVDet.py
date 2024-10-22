@@ -3,10 +3,13 @@ from torch import nn
 from torch.nn import functional as F
 import pytorch_lightning as pl
 
+from typing import List
 import einops
-from utils.datatype import DetectionResults
 
+from utils.datatype import DetectionResults, BatchData
+from utils.metrics import iou_loss, cross_entropy_loss
 
+# Custom Module
 class ConvModule(pl.LightningModule):
     def __init__(self, in_channels, out_channels, kernel_size=(1,1), stride=(1,1), padding=0, bias=False, eps=1e-3, momentum=0.03, activation='silu'):
         super().__init__()
@@ -23,13 +26,15 @@ class ConvModule(pl.LightningModule):
 class StemLayer(pl.LightningModule):
     def __init__(self, in_channels, out_channels):
         super().__init__()
-        self.conv = ConvModule(in_channels, out_channels, kernel_size=(6,6), stride=(2,2), padding=(2,2), bias=False)
+        self.conv = ConvModule(in_channels, out_channels, kernel_size=(5,5), stride=(2,2), padding=(1,1), bias=False)
         
     
     def forward(self, x):
         x = self.conv(x)
         return x
 
+
+# Backbone layer
 class MDyConv(pl.LightningModule):
     def __init__(self, in_channels, attention_out_c, dy_kernel_size=3, dy_padding=1, dy_channel_size=None):
         super().__init__()
@@ -70,26 +75,29 @@ class MDyConv(pl.LightningModule):
 
         kernel_w = self.kernel_fc(attn_x)
         kernel_w = einops.rearrange(
-            kernel_w, 'b (w h) 1 1 -> b 1 w h',
-            w=self.dy_kernel_size, h=self.dy_kernel_size
+            kernel_w, 'b (h w) 1 1 -> b 1 h w',
+            h=self.dy_kernel_size, w=self.dy_kernel_size
         )
 
         # Convolve with first conv residual
         dy_conv = einops.rearrange(
-            kernel_w * channel_w, 'b c w h -> c b w h',
-            w=self.dy_kernel_size, h=self.dy_kernel_size
+            kernel_w * channel_w, 'b c h w -> (b c) 1 h w',
+            h=self.dy_kernel_size, w=self.dy_kernel_size
         )
 
-        x = F.conv2d(x, dy_conv, stride=(1,1), padding=self.dy_padding, groups=self.dy_channel_size)   
+        # Perform dynamic convolution
+        batch_size = x.shape[0]
+        x = einops.rearrange(x, 'b c h w -> 1 (b c) h w')
+        x = F.conv2d(x, dy_conv, stride=(1,1), padding=self.dy_padding, groups=batch_size * self.dy_channel_size)   
 
         # Add residual
+        x = einops.rearrange(x, '1 (b c) h w -> b c h w', b=batch_size)
         x = torch.add(x, residual)
 
 
         return x
 
 
-# Backbone layer
 class MDyCSPModule(pl.LightningModule):
     def __init__(self, in_channels, out_channels, reduction_ratio=2, dy_channel_size=None):
         super().__init__()
@@ -214,6 +222,7 @@ class ObjectnessHead(pl.LightningModule):
 
     def forward(self, x):
         x = self.conv_bbox(x)
+
         x = einops.rearrange(
             x, 'b (n_anchors obj) h w -> b n_anchors h w obj', 
             n_anchors=self.n_anchors, obj=1
@@ -256,15 +265,16 @@ class RTMHead(pl.LightningModule):
 
         for f_map, det_head in zip(f_maps, self.detection_head):
             outs.append(DetectionResults(
-                obj=det_head['obj'](f_map),
-                bbox=det_head['bbox'](f_map)
+                # Set output shape for prediction
+                obj=einops.rearrange(det_head['obj'](f_map), 'b n_anchors h w obj -> b (n_anchors h w) obj'),
+                bbox=einops.rearrange(det_head['bbox'](f_map), 'b n_anchors h w bbox -> b (n_anchors h w) bbox')
             ))
         
         return outs
 
 
 class RTMUAVDet(pl.LightningModule):
-    def __init__(self, img_channels):
+    def __init__(self, img_channels, n_anchors):
         super().__init__()
 
         self.backbone = nn.ModuleDict(dict(
@@ -278,7 +288,7 @@ class RTMUAVDet(pl.LightningModule):
 
         self.neck = MFDFEncoderModule(x1_c_in=128, x2_c_in=256)
 
-        self.head = RTMHead(x_c_in=[128, 256], n_anchors=3)
+        self.head = RTMHead(x_c_in=[128, 256], n_anchors=n_anchors)
     
     def forward(self, x):
         x1 = self.backbone['MDyCSP_1'](x)
@@ -290,3 +300,30 @@ class RTMUAVDet(pl.LightningModule):
         outs = self.head(x1, x2)
 
         return outs
+    
+    # TODO: add to config --> learning_rate
+    def configure_optimizers(self):
+        optimizer = torch.optim.Adam(self.parameters(), lr=0.001)
+        return optimizer
+
+    def compute_loss(self, logits:List[DetectionResults], batch:BatchData):
+        total_loss = 0
+
+        for det in logits:
+            total_loss += (iou_loss(det.bbox, batch.bbox) + cross_entropy_loss(det.obj, batch.obj))
+
+        return (total_loss / len(logits))
+
+    def training_step(self, batch:BatchData, batch_idx):
+        logits = self.forward(batch.image)
+        loss = self.compute_loss(logits, batch)
+        self.log('train_loss', loss, prog_bar=True, batch_size=len(batch))
+
+        return loss
+
+    def validation_step(self, batch:BatchData, batch_idx):
+        logits = self.forward(batch.image)
+        loss = self.compute_loss(logits, batch)
+        self.log('val_loss', loss, on_epoch=True, prog_bar=True, batch_size=len(batch))
+
+        return loss

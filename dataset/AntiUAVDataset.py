@@ -8,7 +8,7 @@ import os
 import io
 
 from ._helper import load_json, load_attributes, connect_sftp
-
+from utils.datatype import BatchData
 
 # TODO: to apply Mosaics and Random Affine transform for image and bbox
 class AntiUAVDataset(Dataset):
@@ -36,7 +36,7 @@ class AntiUAVDataset(Dataset):
         else:
             img = transforms.ToTensor()(img)
 
-        return dict(image=img, bbox=bbox, exist=torch.tensor(row.exist))
+        return BatchData(image=img, bbox=bbox, obj=torch.tensor(row.exist))
 
     def __load_image(self, img_path):
 
