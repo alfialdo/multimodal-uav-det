@@ -1,0 +1,29 @@
+hydra:
+  output_subdir: null  
+  run:
+    dir: .
+
+dataset:
+  root_dir: /home/aldo/opt/dataset/Anti-UAV-RGBT
+  batch_size: 4
+  remote: false
+  image_size: [640, 640]
+  workers: 4
+
+train:
+  model: RTMUAVDet
+  hparams:
+    n_anchors: 3
+    lr: 0.001
+  trainer:
+    epochs: 1
+    profiler: simple
+    grad_batches: 4
+    train_batches: 0.1
+    val_batches: 0.1
+    accelerator: gpu
+    devices: 1
+    seed: 11
+
+
+

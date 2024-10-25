@@ -5,9 +5,11 @@ from torchvision import transforms as T
 import pytorch_lightning as pl
 from pytorch_lightning import seed_everything
 
+import hydra
+from omegaconf import OmegaConf
+
 import os
 
-# TODO: add to config --> root_dir, batch_size, remote, img_size, tsfm (?)
 def get_dataloader(**kwargs):
     root_dir = kwargs.get('root_dir')
     batch_size = kwargs.get('batch_size')
@@ -18,7 +20,7 @@ def get_dataloader(**kwargs):
     tsfm = T.Compose([
         T.Resize(size=img_size), # Resize to img_size
         T.ToTensor(),
-        # T.Lambda(lambda x: x / 255.0)  # Scale pixel values to range 0-1
+        T.Lambda(lambda x: x / 255.0)  # Scale pixel values to range 0-1
     ])
 
     if test:
@@ -31,25 +33,42 @@ def get_dataloader(**kwargs):
     return train_loader, val_loader
 
 
+@hydra.main(config_path="conf", config_name="config")
+def train(config):
+    print("Training config:")
+    print(OmegaConf.to_yaml(config))
 
-if __name__ == "__main__":
-    # TODO: add config --> root_dir, batch_size, remote, img_size, seed
-    
-    seed_everything(11, workers=True)
+    dataset_cfg = config.dataset
+    trainer_cfg = config.train.trainer
+    hparams= config.train.hparams
+
+    if trainer_cfg.seed:
+        seed_everything(trainer_cfg.seed, workers=True)
     
     train_loader, val_loader = get_dataloader(
-        root_dir='/home/wicomai/dataset/Anti-UAV-RGBT',
-        batch_size=8,
-        remote=True,
-        img_size=(640, 640)
+        root_dir=dataset_cfg.root_dir,
+        batch_size=dataset_cfg.batch_size,
+        remote=dataset_cfg.remote,
+        img_size=dataset_cfg.image_size,
+        workers=dataset_cfg.workers
     )
 
-    # TODO: add to config --> model and trainer configuration
-    model = RTMUAVDet(img_channels=3, n_anchors=3)
+    if config.train.model == "RTMUAVDet":
+        model = RTMUAVDet(img_channels=3, n_anchors=hparams.n_anchors, learning_rate=hparams.lr)
+    else:
+        raise ValueError(f"Model {config.train.model} not supported")
+
     trainer = pl.Trainer(
-        max_epochs=5,
-        accelerator='gpu',
-        devices=1,
+        max_epochs=trainer_cfg.epochs,
+        accelerator=trainer_cfg.accelerator,
+        devices=trainer_cfg.devices,
+        profiler=trainer_cfg.profiler,
+        accumulate_grad_batches=trainer_cfg.grad_batches,
+        limit_train_batches=trainer_cfg.train_batches,
+        limit_val_batches=trainer_cfg.val_batches
     )
 
     trainer.fit(model, train_loader, val_loader)
+
+if __name__ == "__main__":
+    train()

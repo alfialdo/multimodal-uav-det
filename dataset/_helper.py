@@ -104,7 +104,7 @@ def connect_sftp():
 
 
 
-def create_dataloader(dir_path, batch_size, shuffle=False, tsfm=None, remote=None, img_size=(640,640)):
+def create_dataloader(dir_path, batch_size, shuffle=False, tsfm=None, remote=None, img_size=(640,640), workers=4):
     """
     Create a DataLoader for the AntiUAVDataset.
 
@@ -122,7 +122,7 @@ def create_dataloader(dir_path, batch_size, shuffle=False, tsfm=None, remote=Non
     from .AntiUAVDataset import AntiUAVDataset
     dataset = AntiUAVDataset(root_dir=dir_path, transform=tsfm, remote=remote, size=img_size)
 
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=2)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=workers)
 
     return dataloader
 

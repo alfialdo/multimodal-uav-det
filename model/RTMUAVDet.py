@@ -274,8 +274,10 @@ class RTMHead(pl.LightningModule):
 
 
 class RTMUAVDet(pl.LightningModule):
-    def __init__(self, img_channels, n_anchors):
+    def __init__(self, img_channels, n_anchors, learning_rate):
         super().__init__()
+
+        self.learning_rate = learning_rate
 
         self.backbone = nn.ModuleDict(dict(
             MDyCSP_1=nn.Sequential(
@@ -301,9 +303,8 @@ class RTMUAVDet(pl.LightningModule):
 
         return outs
     
-    # TODO: add to config --> learning_rate
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=0.001)
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
         return optimizer
 
     def compute_loss(self, logits:List[DetectionResults], batch:BatchData):

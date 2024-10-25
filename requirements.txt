@@ -1,3 +1,4 @@
+absl-py==2.1.0
 aiohappyeyeballs==2.4.3
 aiohttp==3.10.9
 aiohttp-retry==2.8.3
@@ -56,6 +57,7 @@ funcy==2.0
 gitdb==4.0.11
 GitPython==3.1.43
 grandalf==0.8
+grpcio==1.67.0
 gto==1.7.1
 hydra-core==1.3.2
 idna==3.10
@@ -72,6 +74,7 @@ jupyter_core==5.7.2
 kiwisolver==1.4.7
 kombu==5.4.2
 lightning-utilities==0.11.8
+Markdown==3.7
 markdown-it-py==3.0.0
 MarkupSafe==2.1.5
 matplotlib==3.9.2
@@ -109,6 +112,7 @@ pillow==10.4.0
 platformdirs==3.11.0
 plotly==5.24.1
 prompt_toolkit==3.0.48
+protobuf==5.28.2
 psutil==6.1.0
 ptyprocess==0.7.0
 pure_eval==0.2.3
@@ -145,6 +149,7 @@ stack-data==0.6.3
 sympy==1.13.3
 tabulate==0.9.0
 tenacity==9.0.0
+tensorboard-data-server==0.7.2
 tomlkit==0.13.2
 torch==2.4.1
 torchinfo==1.8.0
@@ -161,6 +166,7 @@ urllib3==2.2.3
 vine==5.1.0
 voluptuous==0.15.2
 wcwidth==0.2.13
+Werkzeug==3.0.4
 yarl==1.13.1
 zc.lockfile==3.0.post1
 zipp==3.20.2
