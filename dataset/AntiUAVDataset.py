@@ -27,11 +27,10 @@ class AntiUAVDataset(Dataset):
     def __getitem__(self, idx):
         row = self.data.iloc[idx]
         img = self.__load_image(row.img_path)
-        bbox = torch.tensor(row.gt_rect)
         
         # Apply necessary transforms to the image
         if self.transform:
-            bbox = self.__resize_bbox(img.size, bbox)
+            bbox = self.__resize_bbox(img.size, row.gt_rect)
             img = self.transform(img)
         else:
             img = transforms.ToTensor()(img)
@@ -91,25 +90,24 @@ class AntiUAVDataset(Dataset):
         df = pd.concat(df, ignore_index=True)
         df = df[df['exist'] == 1].reset_index(drop=True)
 
+        # Transform bbox to xyxy
+        df['gt_rect'] = df.gt_rect.apply(lambda x: box_convert(torch.tensor(x), 'xywh', 'xyxy').squeeze(0))
+        
         return df
     
 
     def __resize_bbox(self, img_size, bbox):
-        bbox_xyxy = box_convert(bbox, 'xywh', 'xyxy').squeeze(0)
         w, h = img_size
 
         scale_x = self.size[0] / w
         scale_y = self.size[1] / h
         
-        bbox_xyxy[0] = int(bbox_xyxy[0] * scale_x)
-        bbox_xyxy[1] = int(bbox_xyxy[1] * scale_y)
-        bbox_xyxy[2] = int(bbox_xyxy[2] * scale_x)
-        bbox_xyxy[3] = int(bbox_xyxy[3] * scale_y)
+        bbox[0] = int(bbox[0] * scale_x)
+        bbox[1] = int(bbox[1] * scale_y)
+        bbox[2] = int(bbox[2] * scale_x)
+        bbox[3] = int(bbox[3] * scale_y)
 
-        bbox_xywh = box_convert(bbox_xyxy, 'xyxy', 'xywh')
-
-        
-        return bbox_xywh
+        return bbox
     
 
         

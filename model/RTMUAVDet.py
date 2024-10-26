@@ -169,7 +169,7 @@ class MDyEncoder(pl.LightningModule):
 
         x = torch.cat([x1,x2,x3], dim=1)
         
-        x = torch.add(x, residual)
+        x = torch.add(x, residual)  
         residual = x
 
         x = self.group_norm_out(x)

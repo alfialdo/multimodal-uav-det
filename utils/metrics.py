@@ -5,7 +5,6 @@ import torch.nn.functional as F
 import einops
 
 def iou_loss(pred, target, reduction='mean'):
-    target = box_convert(target, in_fmt='xywh', out_fmt='xyxy')
     target = einops.rearrange(target, 'b xyxy -> b 1 xyxy')
 
     return complete_box_iou_loss(pred, target, reduction=reduction)

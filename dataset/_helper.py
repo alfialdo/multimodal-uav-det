@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 import matplotlib.pyplot as plt
 
 from torch.utils.data import DataLoader
+from torchvision.ops import box_convert
 
 
 def load_json(path, remote_client=None):
@@ -141,14 +142,14 @@ def plot_sample_data(dataloader):
 
     # Sample 4 random images from the dataloader
     for i, sample in enumerate(dataloader):
-        if i >= 4:  # We only want to plot 4 images
+        if i >= 4: 
             break
         
-        image = sample['image'][0].permute(1, 2, 0).numpy()
-        bbox = sample['bbox'][0].numpy()
+        image = sample.image[0].permute(1, 2, 0).numpy()
+        bbox = sample.bbox[0].numpy()
 
-        # Convert bbox from [x, y, w, h] to [x1, y1, x2, y2]
-        x, y, w, h = bbox
+        # Convert bbox from [x1, y1, x2, y2] to [x, y, w, h]
+        x, y, w, h = bbox[0], bbox[1], bbox[2] - bbox[0], bbox[3] - bbox[1]
 
         # Draw the image
         axes[i].imshow(image)
