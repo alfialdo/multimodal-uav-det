@@ -3,6 +3,8 @@ aiohappyeyeballs==2.4.3
 aiohttp==3.10.9
 aiohttp-retry==2.8.3
 aiosignal==1.3.1
+albucore==0.0.19
+albumentations==1.4.20
 amqp==5.2.0
 annotated-types==0.7.0
 antlr4-python3-runtime==4.9.3
@@ -44,6 +46,7 @@ dvc-studio-client==0.21.0
 dvc-task==0.40.1
 einops==0.8.0
 entrypoints==0.4
+eval_type_backport==0.2.0
 exceptiongroup==1.2.2
 executing==2.1.0
 fastjsonschema==2.20.0
@@ -57,6 +60,7 @@ funcy==2.0
 gitdb==4.0.11
 GitPython==3.1.43
 grandalf==0.8
+graphviz==0.20.3
 grpcio==1.67.0
 gto==1.7.1
 hydra-core==1.3.2
@@ -100,6 +104,7 @@ nvidia-nvjitlink-cu12==12.6.77
 nvidia-nvtx-cu12==12.1.105
 omegaconf==2.3.0
 opencv-python==4.10.0.84
+opencv-python-headless==4.10.0.84
 orjson==3.10.7
 packaging==24.1
 pandas==2.2.3
@@ -137,6 +142,7 @@ rich==13.9.2
 rpds-py==0.20.0
 ruamel.yaml==0.18.6
 ruamel.yaml.clib==0.2.8
+scipy==1.14.1
 scmrepo==3.3.8
 semver==3.0.2
 shellingham==1.5.4
@@ -146,6 +152,7 @@ six==1.16.0
 smmap==5.0.1
 sqltrie==0.11.1
 stack-data==0.6.3
+stringzilla==3.10.5
 sympy==1.13.3
 tabulate==0.9.0
 tenacity==9.0.0
@@ -154,6 +161,7 @@ tomlkit==0.13.2
 torch==2.4.1
 torchinfo==1.8.0
 torchmetrics==1.5.0
+torchview==0.2.6
 torchvision==0.19.1
 tornado==6.4.1
 tqdm==4.66.5

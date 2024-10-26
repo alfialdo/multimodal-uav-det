@@ -2,12 +2,13 @@ import os
 import io
 import json
 import paramiko
+import numpy as np
+import cv2
 from dotenv import load_dotenv
 
 import matplotlib.pyplot as plt
 
 from torch.utils.data import DataLoader
-from torchvision.ops import box_convert
 
 
 def load_json(path, remote_client=None):
@@ -105,7 +106,7 @@ def connect_sftp():
 
 
 
-def create_dataloader(dir_path, batch_size, shuffle=False, tsfm=None, remote=None, img_size=(640,640), workers=4):
+def create_dataloader(dir_path, batch_size, shuffle=False, tsfm=None, remote=None, workers=4, mosaic=False):
     """
     Create a DataLoader for the AntiUAVDataset.
 
@@ -115,13 +116,12 @@ def create_dataloader(dir_path, batch_size, shuffle=False, tsfm=None, remote=Non
     shuffle (bool, optional): Whether to shuffle the data. Defaults to False.
     tsfm (callable, optional): A function/transform to apply to the image samples. Defaults to None.
     remote (object, optional): A client for remote file access. If None, local file system is used. Defaults to None.
-    img_size (tuple, optional): The size to which images should be resized. Defaults to (640,640).
 
     Returns:
     torch.utils.data.DataLoader: A DataLoader for the AntiUAVDataset.
     """
     from .AntiUAVDataset import AntiUAVDataset
-    dataset = AntiUAVDataset(root_dir=dir_path, transform=tsfm, remote=remote, size=img_size)
+    dataset = AntiUAVDataset(root_dir=dir_path, transform=tsfm, remote=remote, mosaic=mosaic)
 
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=workers)
 
@@ -146,17 +146,22 @@ def plot_sample_data(dataloader):
             break
         
         image = sample.image[0].permute(1, 2, 0).numpy()
-        bbox = sample.bbox[0].numpy()
-
-        # Convert bbox from [x1, y1, x2, y2] to [x, y, w, h]
-        x, y, w, h = bbox[0], bbox[1], bbox[2] - bbox[0], bbox[3] - bbox[1]
+        bboxes = sample.bbox.numpy()
 
         # Draw the image
         axes[i].imshow(image)
 
-        # Draw the bounding box
-        rect = plt.Rectangle((int(x), int(y)), int(w), int(h), fill=False, edgecolor='cyan', linewidth=3)
-        axes[i].add_patch(rect)
+
+        # Convert bbox from [x1, y1, x2, y2] to [x, y, w, h]
+        if len(bboxes[0]) > 0:
+            bboxes = bboxes.squeeze(0)
+
+        for bbox in bboxes:
+            x, y, w, h = bbox[0], bbox[1], bbox[2] - bbox[0], bbox[3] - bbox[1]
+
+            # Draw the bounding box
+            rect = plt.Rectangle((int(x), int(y)), int(w), int(h), fill=False, edgecolor='cyan', linewidth=3)
+            axes[i].add_patch(rect)
 
         axes[i].set_title(f"Sample {i+1}")
         axes[i].axis('off')
@@ -164,3 +169,42 @@ def plot_sample_data(dataloader):
     plt.tight_layout()
     plt.show()
 
+
+def create_mosaic_4_img(images, bboxes, target_size=(640, 640)):
+    if len(images) != 4 or len(bboxes) != 4:
+        raise ValueError("Exactly 4 images and 4 sets of bounding boxes are required to create a mosaic.")
+    
+    # Create a new blank image
+    mosaic = np.zeros((target_size[0], target_size[1], 3), dtype=np.uint8)
+    
+    # Calculate the size of each image in the mosaic
+    img_width, img_height = target_size[0] // 2, target_size[1] // 2
+    
+    # Initialize list to store updated bounding boxes
+    updated_bboxes = []
+    
+    # Resize and paste each image into the mosaic
+    for i, (img, bbox) in enumerate(zip(images, bboxes)):
+        # Resize the image
+        original_size = img.shape[:2]
+        img_resized = cv2.resize(img, (img_width, img_height), interpolation=cv2.INTER_LANCZOS4)
+        
+        # Calculate position
+        x = (i % 2) * img_width
+        y = (i // 2) * img_height
+        
+        # Paste the image
+        mosaic[y:y+img_height, x:x+img_width] = img_resized
+        
+        # Update bounding box coordinates
+        scale_x = img_width / original_size[1]
+        scale_y = img_height / original_size[0]
+        
+        x1, y1, x2, y2 = bbox
+        x1 = x + (x1 * scale_x)
+        y1 = y + (y1 * scale_y)
+        x2 = x + (x2 * scale_x)
+        y2 = y + (y2 * scale_y)
+        updated_bboxes.append([x1, y1, x2, y2])
+        
+    return mosaic, updated_bboxes

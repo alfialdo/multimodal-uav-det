@@ -1,41 +1,50 @@
 import torch
 from torch.utils.data import Dataset
 from torchvision.ops import box_convert
-from torchvision import transforms
+from albumentations.pytorch import ToTensorV2
+
 from PIL import Image
 import pandas as pd
+import numpy as np
 import os
 import io
 
-from ._helper import load_json, load_attributes, connect_sftp
+from ._helper import load_json, load_attributes, connect_sftp, create_mosaic_4_img
 from utils.datatype import BatchData
 
-# TODO: to apply Mosaics and Random Affine transform for image and bbox
 class AntiUAVDataset(Dataset):
-    def __init__(self, root_dir, transform=None, remote=None, size=None):
+    def __init__(self, root_dir, transform, remote=None, mosaic=False):
         self.data_set = os.path.basename(root_dir)
         self.remote = remote
         self.data = self.__load_data(root_dir)
         self.transform = transform
-        self.size = size
-        
+        self.mosaic = mosaic
 
     def __len__(self):
-        return len(self.data)
+        return len(self.data) // 4
     
 
     def __getitem__(self, idx):
-        row = self.data.iloc[idx]
-        img = self.__load_image(row.img_path)
-        
-        # Apply necessary transforms to the image
-        if self.transform:
-            bbox = self.__resize_bbox(img.size, row.gt_rect)
-            img = self.transform(img)
-        else:
-            img = transforms.ToTensor()(img)
+        if self.mosaic:
+            total_img = 4
+            rows = self.data.sample(total_img)
 
-        return BatchData(image=img, bbox=bbox, obj=torch.tensor(row.exist))
+            images = [self.__load_image(x) for x in rows.img_path]
+            bboxes = rows.gt_rect.tolist()
+            labels = rows.exist.tolist()
+            img, bboxes = create_mosaic_4_img(images, bboxes)
+
+        else:
+            row = self.data.iloc[idx]
+            img = self.__load_image(row.img_path)
+            bboxes = [row.gt_rect]
+            labels = [row.exist]
+
+        # Apply necessary transforms to the image
+        results = self.transform(image=img, bboxes=bboxes, labels=labels)
+        bbox = torch.tensor(results['bboxes']).squeeze(0)
+            
+        return BatchData(image=results['image'], bbox=bbox, obj=torch.tensor(labels))
 
     def __load_image(self, img_path):
 
@@ -49,7 +58,7 @@ class AntiUAVDataset(Dataset):
         else:
             img = Image.open(img_path)
 
-        return img
+        return np.array(img)
         
     
     def __load_data(self, root_dir):
@@ -61,6 +70,7 @@ class AntiUAVDataset(Dataset):
         else:
             sftp = None
             list_dir = os.listdir
+
 
         attr_dir = os.path.join(os.path.dirname(root_dir), 'label_new')
         attr = load_attributes(attr_dir, remote_client=sftp)
@@ -94,20 +104,6 @@ class AntiUAVDataset(Dataset):
         df['gt_rect'] = df.gt_rect.apply(lambda x: box_convert(torch.tensor(x), 'xywh', 'xyxy').squeeze(0))
         
         return df
-    
-
-    def __resize_bbox(self, img_size, bbox):
-        w, h = img_size
-
-        scale_x = self.size[0] / w
-        scale_y = self.size[1] / h
-        
-        bbox[0] = int(bbox[0] * scale_x)
-        bbox[1] = int(bbox[1] * scale_y)
-        bbox[2] = int(bbox[2] * scale_x)
-        bbox[3] = int(bbox[3] * scale_y)
-
-        return bbox
     
 
         
