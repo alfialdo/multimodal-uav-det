@@ -106,22 +106,25 @@ def connect_sftp():
 
 
 
-def create_dataloader(dir_path, batch_size, shuffle=False, tsfm=None, remote=None, workers=4, mosaic=False):
+def create_dataloader(dir_path, batch_size, shuffle=False, tsfm=None, remote=None, workers=4, mosaic=False, img_size=(640, 640)):
     """
     Create a DataLoader for the AntiUAVDataset.
 
     Args:
-    dir_path (str): The root directory path for the dataset.
-    batch_size (int): The batch size for the DataLoader.
-    shuffle (bool, optional): Whether to shuffle the data. Defaults to False.
-    tsfm (callable, optional): A function/transform to apply to the image samples. Defaults to None.
-    remote (object, optional): A client for remote file access. If None, local file system is used. Defaults to None.
+        dir_path (str): The root directory path for the dataset.
+        batch_size (int): The batch size for the DataLoader.
+        shuffle (bool, optional): Whether to shuffle the data. Defaults to False.
+        tsfm (callable, optional): A function/transform to apply to the image samples. Defaults to None.
+        remote (object, optional): A client for remote file access. If None, local file system is used. Defaults to None.
+        workers (int, optional): Number of worker processes for data loading. Defaults to 4.
+        mosaic (bool, optional): Whether to use mosaic augmentation. Defaults to False.
+        img_size (tuple, optional): Target size (height, width) to resize images to. Defaults to (640, 640).
 
     Returns:
-    torch.utils.data.DataLoader: A DataLoader for the AntiUAVDataset.
+        torch.utils.data.DataLoader: A DataLoader for the AntiUAVDataset.
     """
     from .AntiUAVDataset import AntiUAVDataset
-    dataset = AntiUAVDataset(root_dir=dir_path, transform=tsfm, remote=remote, mosaic=mosaic)
+    dataset = AntiUAVDataset(root_dir=dir_path, transform=tsfm, remote=remote, mosaic=mosaic, img_size=img_size)
 
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=workers)
 
@@ -171,8 +174,8 @@ def plot_sample_data(dataloader):
 
 
 def create_mosaic_4_img(images, bboxes, target_size=(640, 640)):
-    if len(images) != 4 or len(bboxes) != 4:
-        raise ValueError("Exactly 4 images and 4 sets of bounding boxes are required to create a mosaic.")
+    if len(images) < 4 or len(images) != len(bboxes):
+        raise ValueError("Need at least 4 images and 4 sets of bounding boxes to create a mosaic.")
     
     # Create a new blank image
     mosaic = np.zeros((target_size[0], target_size[1], 3), dtype=np.uint8)
@@ -184,18 +187,13 @@ def create_mosaic_4_img(images, bboxes, target_size=(640, 640)):
     updated_bboxes = []
     
     # Resize and paste each image into the mosaic
-    for i, (img, bbox) in enumerate(zip(images, bboxes)):
-        # Resize the image
+    i = 0
+    for img, bbox in zip(images, bboxes):
+        # Get original image size and calculate position
         original_size = img.shape[:2]
-        img_resized = cv2.resize(img, (img_width, img_height), interpolation=cv2.INTER_LANCZOS4)
-        
-        # Calculate position
         x = (i % 2) * img_width
         y = (i // 2) * img_height
-        
-        # Paste the image
-        mosaic[y:y+img_height, x:x+img_width] = img_resized
-        
+
         # Update bounding box coordinates
         scale_x = img_width / original_size[1]
         scale_y = img_height / original_size[0]
@@ -205,6 +203,19 @@ def create_mosaic_4_img(images, bboxes, target_size=(640, 640)):
         y1 = y + (y1 * scale_y)
         x2 = x + (x2 * scale_x)
         y2 = y + (y2 * scale_y)
+
+        if x1 >= x2 or y1 >= y2:
+            continue
+
         updated_bboxes.append([x1, y1, x2, y2])
+    
+        # Resize and paste the image to placeholder
+        img_resized = cv2.resize(img, (img_width, img_height), interpolation=cv2.INTER_LANCZOS4)
+        mosaic[y:y+img_height, x:x+img_width] = img_resized
+
+        if len(updated_bboxes) >= 4:
+            return mosaic, updated_bboxes
+            
+        i += 1
         
-    return mosaic, updated_bboxes
+    

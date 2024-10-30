@@ -13,12 +13,13 @@ from ._helper import load_json, load_attributes, connect_sftp, create_mosaic_4_i
 from utils.datatype import BatchData
 
 class AntiUAVDataset(Dataset):
-    def __init__(self, root_dir, transform, remote=None, mosaic=False):
+    def __init__(self, root_dir, transform, remote=None, mosaic=False, img_size=(640, 640)):
         self.data_set = os.path.basename(root_dir)
         self.remote = remote
         self.data = self.__load_data(root_dir)
         self.transform = transform
         self.mosaic = mosaic
+        self.img_size = img_size
 
     def __len__(self):
         return len(self.data) // 4
@@ -26,25 +27,29 @@ class AntiUAVDataset(Dataset):
 
     def __getitem__(self, idx):
         if self.mosaic:
-            total_img = 4
+            total_img = 10
             rows = self.data.sample(total_img)
 
             images = [self.__load_image(x) for x in rows.img_path]
             bboxes = rows.gt_rect.tolist()
-            labels = rows.exist.tolist()
-            img, bboxes = create_mosaic_4_img(images, bboxes)
+            img, bboxes = create_mosaic_4_img(images, bboxes, target_size=self.img_size)
+            labels = [1] * len(bboxes)
 
         else:
             row = self.data.iloc[idx]
             img = self.__load_image(row.img_path)
             bboxes = [row.gt_rect]
-            labels = [row.exist]
+            labels = [1]
 
         # Apply necessary transforms to the image
         results = self.transform(image=img, bboxes=bboxes, labels=labels)
         bbox = torch.tensor(results['bboxes']).squeeze(0)
             
-        return BatchData(image=results['image'], bbox=bbox, obj=torch.tensor(labels))
+        return BatchData(
+            image=results['image'], 
+            bbox=bbox, 
+            # obj=torch.tensor(labels)
+        )
 
     def __load_image(self, img_path):
 
@@ -98,7 +103,7 @@ class AntiUAVDataset(Dataset):
 
         # Filter images that not bounding box
         df = pd.concat(df, ignore_index=True)
-        df = df[df['exist'] == 1].reset_index(drop=True)
+        df = df[df.exist == 1].reset_index(drop=True)
 
         # Transform bbox to xyxy
         df['gt_rect'] = df.gt_rect.apply(lambda x: box_convert(torch.tensor(x), 'xywh', 'xyxy').squeeze(0))

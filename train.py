@@ -1,9 +1,11 @@
 from model.RTMUAVDet import RTMUAVDet
 from dataset import create_dataloader
 
-from torchvision import transforms as T
+import torch
 import pytorch_lightning as pl
 from pytorch_lightning import seed_everything
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
 
 import hydra
 from omegaconf import OmegaConf
@@ -16,19 +18,21 @@ def get_dataloader(**kwargs):
     remote = kwargs.get('remote')
     img_size = kwargs.get('img_size', (640, 640))
     test = kwargs.get('test', False)
+    mosaic = kwargs.get('mosaic', False)
 
-    tsfm = T.Compose([
-        T.Resize(size=img_size), # Resize to img_size
-        T.ToTensor(),
-        T.Lambda(lambda x: x / 255.0)  # Scale pixel values to range 0-1
-    ])
+    tsfm = A.Compose([
+        A.Resize(img_size[0], img_size[1]),
+        A.Affine(scale=(0.8, 1.2), translate_percent=(-0.1, 0.1), rotate=(-30, 30), shear=(-15, 15)),
+        A.ToFloat(max_value=255.0), 
+        ToTensorV2(),
+    ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['labels']))
 
     if test:
-        test_loader = create_dataloader(dir_path=os.path.join(root_dir, "test"), batch_size=batch_size, shuffle=False, remote=remote, img_size=img_size)
+        test_loader = create_dataloader(dir_path=os.path.join(root_dir, "test"), batch_size=batch_size, remote=remote, img_size=img_size)
         return test_loader
     
-    train_loader = create_dataloader(dir_path=os.path.join(root_dir, "train"), tsfm=tsfm, batch_size=batch_size, shuffle=True, remote=remote, img_size=img_size)
-    val_loader = create_dataloader(dir_path=os.path.join(root_dir, "val"), tsfm=tsfm, batch_size=batch_size, shuffle=False, remote=remote, img_size=img_size)
+    train_loader = create_dataloader(dir_path=os.path.join(root_dir, "train"), tsfm=tsfm, batch_size=batch_size, remote=remote, img_size=img_size, mosaic=mosaic)
+    val_loader = create_dataloader(dir_path=os.path.join(root_dir, "val"), tsfm=tsfm, batch_size=batch_size, remote=remote, img_size=img_size, mosaic=mosaic)
 
     return train_loader, val_loader
 
@@ -50,11 +54,13 @@ def train(config):
         batch_size=dataset_cfg.batch_size,
         remote=dataset_cfg.remote,
         img_size=dataset_cfg.image_size,
-        workers=dataset_cfg.workers
+        workers=dataset_cfg.workers,
+        mosaic=dataset_cfg.mosaic
     )
 
     if config.train.model == "RTMUAVDet":
-        model = RTMUAVDet(img_channels=3, n_anchors=hparams.n_anchors, learning_rate=hparams.lr)
+        anchors = torch.tensor(hparams.anchors)
+        model = RTMUAVDet(input_size=trainer_cfg.input_size, anchors=anchors, learning_rate=hparams.lr, optimizer=hparams.optim, det_scales=hparams.det_scales)
     else:
         raise ValueError(f"Model {config.train.model} not supported")
 

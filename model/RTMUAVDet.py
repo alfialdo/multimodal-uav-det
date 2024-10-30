@@ -2,12 +2,13 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 import pytorch_lightning as pl
+from torchvision.ops import box_iou, box_convert
 
 from typing import List
 import einops
 
 from utils.datatype import DetectionResults, BatchData
-from utils.metrics import iou_loss, cross_entropy_loss
+from utils.metrics import bbox_loss, objectness_loss
 
 # Custom Module
 class ConvModule(pl.LightningModule):
@@ -219,6 +220,7 @@ class ObjectnessHead(pl.LightningModule):
         predict_c = n_anchors * 1
         self.n_anchors = n_anchors
         self.conv_bbox = nn.Conv2d(in_channels, predict_c, kernel_size=(1,1), stride=(1,1))
+        self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
         x = self.conv_bbox(x)
@@ -228,6 +230,8 @@ class ObjectnessHead(pl.LightningModule):
             n_anchors=self.n_anchors, obj=1
         )
 
+        x = self.sigmoid(x)
+
         return x
     
 class BBoxHead(pl.LightningModule):
@@ -236,6 +240,7 @@ class BBoxHead(pl.LightningModule):
         predict_c = n_anchors * 4
         self.n_anchors = n_anchors
         self.conv_obj = nn.Conv2d(in_channels, predict_c, kernel_size=(1,1), stride=(1,1))
+        self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
         x = self.conv_obj(x)
@@ -244,14 +249,19 @@ class BBoxHead(pl.LightningModule):
             n_anchors=self.n_anchors, bbox=4
         )
 
+        x = self.sigmoid(x)
+
         return x
     
 
 class RTMHead(pl.LightningModule):
-    def __init__(self, x_c_in:list, n_anchors):
+    def __init__(self, x_c_in:list, anchors:list, det_scales:list):
         super().__init__()
 
+        self.det_scales = det_scales
         self.detection_head = nn.ModuleList()
+        self.anchors = anchors
+        n_anchors = len(anchors[0])
 
         for in_channels in x_c_in:
             self.detection_head.append(nn.ModuleDict(dict(
@@ -259,30 +269,59 @@ class RTMHead(pl.LightningModule):
                 bbox=BBoxHead(in_channels, n_anchors)
             )))
 
+    
+    def __calculate_bbox_size(self, batch_size, h, w, bbox, anchors):
+        # Setup grid coordnates for offsets
+        device = bbox.device
+        grid_x = torch.arange(w).repeat(batch_size, len(anchors), w, 1).to(device)
+        grid_y = torch.arange(h).repeat(batch_size, len(anchors), h, 1).transpose(2, 3).to(device)
+
+        # Setup anchor size
+        anchor_w = einops.rearrange(anchors[:, 0], 'size -> 1 size 1 1').to(device)
+        anchor_h = einops.rearrange(anchors[:, 1], 'size -> 1 size 1 1').to(device)
+
+        # Calculate bbox coordinates relative to grid
+        px = (bbox[..., 0] * 2 - 0.5 + grid_x)
+        py = (bbox[..., 1] * 2 - 0.5 + grid_y)
+        pw = (bbox[..., 2] * 2) ** 2 * anchor_w
+        ph = (bbox[..., 3] * 2) ** 2 * anchor_h
+        bbox = torch.stack([px, py, pw, ph], dim=-1)
+        
+        return bbox
+    
     def forward(self, x1, x2):
         f_maps = [x1, x2]
         outs = []
 
-        for f_map, det_head in zip(f_maps, self.detection_head):
-            outs.append(DetectionResults(
-                # Set output shape for prediction
-                obj=einops.rearrange(det_head['obj'](f_map), 'b n_anchors h w obj -> b (n_anchors h w) obj'),
-                bbox=einops.rearrange(det_head['bbox'](f_map), 'b n_anchors h w bbox -> b (n_anchors h w) bbox')
-            ))
+        for head_idx, (f_map, det_head) in enumerate(zip(f_maps, self.detection_head)):
+            scale = einops.parse_shape(f_map, 'b n_anchors h w')
+            obj = det_head['obj'](f_map)
+            bbox = det_head['bbox'](f_map)
+
+            # Calculate bbox coordinates relative to grid
+            bbox = self.__calculate_bbox_size(
+                scale['b'], scale['h'], scale['w'], 
+                bbox, self.anchors[head_idx]
+            )
+
+            outs.append(DetectionResults(obj=obj, bbox=bbox))
         
         return outs
 
 
 class RTMUAVDet(pl.LightningModule):
-    def __init__(self, img_channels, n_anchors, learning_rate):
+    def __init__(self, input_size, anchors, learning_rate, optimizer='Adam', det_scales=[160, 80]):
         super().__init__()
 
         self.learning_rate = learning_rate
+        self.optimizer = optimizer
+        self.input_size = input_size
+        self.det_scales = det_scales
 
         self.backbone = nn.ModuleDict(dict(
             MDyCSP_1=nn.Sequential(
                 # TODO: increase stem layer output channel?
-                StemLayer(img_channels, 32),
+                StemLayer(input_size[0], 32),
                 MDyCSPModule(in_channels=32, out_channels=128, dy_channel_size=128),
             ),
             MDyCSP_2=MDyCSPModule(in_channels=128, out_channels=256)
@@ -290,7 +329,7 @@ class RTMUAVDet(pl.LightningModule):
 
         self.neck = MFDFEncoderModule(x1_c_in=128, x2_c_in=256)
 
-        self.head = RTMHead(x_c_in=[128, 256], n_anchors=n_anchors)
+        self.head = RTMHead(x_c_in=[128, 256], anchors=anchors, det_scales=det_scales)
     
     def forward(self, x):
         x1 = self.backbone['MDyCSP_1'](x)
@@ -304,27 +343,77 @@ class RTMUAVDet(pl.LightningModule):
         return outs
     
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
+        if self.optimizer == 'SGD':
+            optimizer = torch.optim.SGD(self.parameters(), lr=self.learning_rate)
+        elif self.optimizer == 'Adam':
+            optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
+        else:
+            raise ValueError(f"Invalid optimizer: {self.optimizer}")
+
         return optimizer
 
-    def compute_loss(self, logits:List[DetectionResults], batch:BatchData):
-        total_loss = 0
+    def compute_loss(self, outs:List[DetectionResults], batch:BatchData):
+        
+        device = outs[0].bbox.device
+        total_loss = torch.tensor(0.0).to(device)
 
-        for det in logits:
-            total_loss += (iou_loss(det.bbox, batch.bbox) + cross_entropy_loss(det.obj, batch.obj))
+        for i, det in enumerate(outs):
+            # Prepare preds and targets
+            p_bbox, p_obj = self.__prepare_preds(det)
+            t_bbox = self.__scale_targets(batch.bbox, self.det_scales[i], device)
 
-        return (total_loss / len(logits))
+            # Filter high IoU bboxes
+            filtered_p_bbox, t_obj = self.__filter_high_iou_bboxes(p_bbox, t_bbox)
+            total_loss += (bbox_loss(filtered_p_bbox, t_bbox) + objectness_loss(p_obj, t_obj))
+
+
+        return total_loss
 
     def training_step(self, batch:BatchData, batch_idx):
-        logits = self.forward(batch.image)
-        loss = self.compute_loss(logits, batch)
+        outs = self.forward(batch.image)
+        loss = self.compute_loss(outs, batch)
         self.log('train_loss', loss, prog_bar=True, batch_size=len(batch))
 
         return loss
 
     def validation_step(self, batch:BatchData, batch_idx):
-        logits = self.forward(batch.image)
-        loss = self.compute_loss(logits, batch)
+        outs = self.forward(batch.image)
+        loss = self.compute_loss(outs, batch)
         self.log('val_loss', loss, on_epoch=True, prog_bar=True, batch_size=len(batch))
 
         return loss
+    
+    def __filter_high_iou_bboxes(self, preds, targets, iou_th=0.5):
+        # Calculate IoU matrix
+        # preds_xyxy = box_convert(preds, in_fmt='cxcywh', out_fmt='xyxy')
+        # targets_xyxy = box_convert(targets, in_fmt='cxcywh', out_fmt='xyxy')
+        device = preds.device
+        ious = box_iou(preds.squeeze(), targets.squeeze()) 
+        
+        # Get maximum IoU for each prediction
+        max_ious, _ = torch.max(ious, dim=1)  # (19200,)
+
+        # Filter IoU than less than threshold (0.5)
+        filter_iou = max_ious > iou_th
+        filtered_preds = preds[:, filter_iou, :]
+        
+        # Create objectness matrix (0 or 1)
+        objectness = torch.zeros_like(max_ious).to(device)
+        objectness[filter_iou] = 1.0
+        
+        return filtered_preds, objectness
+    
+    def __scale_targets(self, targets, det_scale, device):
+        # targets = box_convert(targets, in_fmt='xyxy', out_fmt='cxcywh')
+        scale_factor = self.input_size[1] // det_scale
+        scaled_targets = targets / scale_factor
+
+        return scaled_targets.to(device)
+    
+    def __prepare_preds(self, det:DetectionResults):
+        p_bbox = einops.rearrange(det.bbox, 'b n_anchors h w bbox -> b (n_anchors h w) bbox')
+        p_obj = einops.rearrange(det.obj, 'b n_anchors h w obj -> b (n_anchors h w) obj')
+
+        p_bbox = box_convert(p_bbox, in_fmt='cxcywh', out_fmt='xyxy')
+
+        return p_bbox, p_obj

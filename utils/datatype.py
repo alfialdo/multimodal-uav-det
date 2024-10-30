@@ -8,4 +8,4 @@ class DetectionResults(NamedTuple):
 class BatchData(NamedTuple):
     image: torch.Tensor
     bbox: torch.Tensor
-    obj: torch.Tensor
+    # obj: torch.Tensor
