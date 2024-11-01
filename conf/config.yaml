@@ -21,7 +21,7 @@ train:
   model: RTMUAVDet
   hparams:
     anchors: [
-      [[12, 16], [19, 36], [40, 28]], # x1: small scale
+      [[10, 13], [16, 30], [33, 23]], # x1: small scale
       [[30, 61], [62, 45], [59, 119]] # x2: medium scale
     ] 
     det_scales: [160, 80]
@@ -32,8 +32,8 @@ train:
     input_size: [3, 640, 640]
     profiler: null
     grad_batches: 4
-    train_batches: 0.1
-    val_batches: 0.1
+    train_batches: 0.01
+    val_batches: 0.01
     accelerator: gpu
     devices: 1
     seed: 11
