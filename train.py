@@ -4,67 +4,84 @@ from dataset import create_dataloader
 import torch
 import pytorch_lightning as pl
 from pytorch_lightning import seed_everything
+from pytorch_lightning.loggers import CSVLogger
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 
 import hydra
-from omegaconf import OmegaConf
-
 import os
 
-def get_dataloader(**kwargs):
-    root_dir = kwargs.get('root_dir')
-    batch_size = kwargs.get('batch_size')
-    remote = kwargs.get('remote')
-    img_size = kwargs.get('img_size', (640, 640))
-    test = kwargs.get('test', False)
-    mosaic = kwargs.get('mosaic', False)
+def get_dataloader(config, test=False):
 
-    tsfm = A.Compose([
-        A.Resize(img_size[0], img_size[1]),
+    common_args = dict(
+        remote=config.remote,
+        img_size=config.image_size,
+    )
+
+    train_tsfm = A.Compose([
+        A.Resize(common_args['img_size'][0], common_args['img_size'][1]),
         A.Affine(scale=(0.8, 1.2), translate_percent=(-0.1, 0.1), rotate=(-30, 30), shear=(-15, 15)),
         A.ToFloat(max_value=255.0), 
         ToTensorV2(),
     ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['labels']))
 
+    val_tsfm = A.Compose([
+        A.Resize(common_args['img_size'][0], common_args['img_size'][1]),
+        A.ToFloat(max_value=255.0), 
+        ToTensorV2(),
+    ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['labels']))
+
     if test:
-        test_loader = create_dataloader(dir_path=os.path.join(root_dir, "test"), batch_size=batch_size, remote=remote, img_size=img_size)
+        test_loader = create_dataloader(
+            dir_path=os.path.join(config.root_dir, "test"), 
+            tsfm=val_tsfm,
+            batch_size=config.val_batch_size,
+            **common_args
+        )
+
         return test_loader
+
+    train_loader = create_dataloader(
+        dir_path=os.path.join(config.root_dir, "train"),
+        tsfm=train_tsfm,
+        mosaic=config.mosaic,
+        batch_size=config.train_batch_size,
+        **common_args
+    )
     
-    train_loader = create_dataloader(dir_path=os.path.join(root_dir, "train"), tsfm=tsfm, batch_size=batch_size, remote=remote, img_size=img_size, mosaic=mosaic)
-    val_loader = create_dataloader(dir_path=os.path.join(root_dir, "val"), tsfm=tsfm, batch_size=batch_size, remote=remote, img_size=img_size, mosaic=mosaic)
+    val_loader = create_dataloader(
+        dir_path=os.path.join(config.root_dir, "val"),
+        tsfm=val_tsfm,
+        batch_size=config.val_batch_size,
+        **common_args
+    )
 
     return train_loader, val_loader
 
 
-@hydra.main(config_path="conf", config_name="config")
+@hydra.main(config_path="conf", config_name="config", version_base=None)
 def train(config):
-    print("Training config:")
-    print(OmegaConf.to_yaml(config))
-
     dataset_cfg = config.dataset
     trainer_cfg = config.train.trainer
     hparams= config.train.hparams
+    model = config.train.model
+
+    torch.set_float32_matmul_precision(trainer_cfg.precision)
 
     if trainer_cfg.seed:
         seed_everything(trainer_cfg.seed, workers=True)
     
-    train_loader, val_loader = get_dataloader(
-        root_dir=dataset_cfg.root_dir,
-        batch_size=dataset_cfg.batch_size,
-        remote=dataset_cfg.remote,
-        img_size=dataset_cfg.image_size,
-        workers=dataset_cfg.workers,
-        mosaic=dataset_cfg.mosaic
-    )
+    train_loader, val_loader = get_dataloader(dataset_cfg)
 
-    if config.train.model == "RTMUAVDet":
+    if model == "RTMUAVDet":
+        logger = CSVLogger(save_dir="logs", name=model)
         anchors = torch.tensor(hparams.anchors)
         model = RTMUAVDet(input_size=trainer_cfg.input_size, anchors=anchors, learning_rate=hparams.lr, optimizer=hparams.optim, det_scales=hparams.det_scales)
     else:
-        raise ValueError(f"Model {config.train.model} not supported")
+        raise ValueError(f"Model {model} not supported")
 
     trainer = pl.Trainer(
+        logger=logger,
         max_epochs=trainer_cfg.epochs,
         accelerator=trainer_cfg.accelerator,
         devices=trainer_cfg.devices,

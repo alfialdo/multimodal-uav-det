@@ -356,18 +356,22 @@ class RTMUAVDet(pl.LightningModule):
         
         device = outs[0].bbox.device
         total_loss = torch.tensor(0.0).to(device)
+        batch_size = len(batch.bbox)
 
-        for i, det in enumerate(outs):
-            # Prepare preds and targets
-            p_bbox, p_obj = self.__prepare_preds(det)
-            t_bbox = self.__scale_targets(batch.bbox, self.det_scales[i], device)
+        # Loop through each detection head
+        for i in range(len(outs)):
+            # TODO: must be calculated per batch size
+            # Loop through each batch
+            for pred_bboxes, pred_objs, target_bboxes in zip(outs[i].bbox, outs[i].obj, batch.bbox):
+                # Prepare preds and targets
+                p_bbox, p_obj = self.__prepare_preds(pred_bboxes, pred_objs)
+                t_bbox = self.__scale_targets(target_bboxes, self.det_scales[i], device)
 
-            # Filter high IoU bboxes
-            filtered_p_bbox, t_obj = self.__filter_high_iou_bboxes(p_bbox, t_bbox)
-            total_loss += (bbox_loss(filtered_p_bbox, t_bbox) + objectness_loss(p_obj, t_obj))
+                # Filter high IoU bboxes
+                filtered_p_bbox, t_obj = self.__filter_high_iou_bboxes(p_bbox, t_bbox)
+                total_loss += (bbox_loss(filtered_p_bbox, t_bbox) + objectness_loss(p_obj, t_obj))
 
-
-        return total_loss
+        return total_loss / batch_size
 
     def training_step(self, batch:BatchData, batch_idx):
         outs = self.forward(batch.image)
@@ -385,17 +389,15 @@ class RTMUAVDet(pl.LightningModule):
     
     def __filter_high_iou_bboxes(self, preds, targets, iou_th=0.5):
         # Calculate IoU matrix
-        # preds_xyxy = box_convert(preds, in_fmt='cxcywh', out_fmt='xyxy')
-        # targets_xyxy = box_convert(targets, in_fmt='cxcywh', out_fmt='xyxy')
         device = preds.device
-        ious = box_iou(preds.squeeze(), targets.squeeze()) 
+        ious = box_iou(preds, targets) 
         
         # Get maximum IoU for each prediction
-        max_ious, _ = torch.max(ious, dim=1)  # (19200,)
+        max_ious, _ = torch.max(ious, dim=1)  # (1D)
 
         # Filter IoU than less than threshold (0.5)
         filter_iou = max_ious > iou_th
-        filtered_preds = preds[:, filter_iou, :]
+        filtered_preds = preds[filter_iou, :]
         
         # Create objectness matrix (0 or 1)
         objectness = torch.zeros_like(max_ious).to(device)
@@ -410,9 +412,9 @@ class RTMUAVDet(pl.LightningModule):
 
         return scaled_targets.to(device)
     
-    def __prepare_preds(self, det:DetectionResults):
-        p_bbox = einops.rearrange(det.bbox, 'b n_anchors h w bbox -> b (n_anchors h w) bbox')
-        p_obj = einops.rearrange(det.obj, 'b n_anchors h w obj -> b (n_anchors h w) obj')
+    def __prepare_preds(self, pred_bboxes, pred_objs):
+        p_bbox = einops.rearrange(pred_bboxes, 'n_anchors h w bbox -> (n_anchors h w) bbox')
+        p_obj = einops.rearrange(pred_objs, 'n_anchors h w obj -> (n_anchors h w) obj')
 
         p_bbox = box_convert(p_bbox, in_fmt='cxcywh', out_fmt='xyxy')
 

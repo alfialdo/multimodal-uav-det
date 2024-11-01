@@ -1,3 +1,8 @@
+defaults:
+  - _self_
+  - override hydra/job_logging: none
+  - override hydra/hydra_logging: none
+
 hydra:
   output_subdir: null  
   run:
@@ -5,10 +10,11 @@ hydra:
 
 dataset:
   root_dir: /home/aldo/opt/dataset/Anti-UAV-RGBT
-  batch_size: 1
+  train_batch_size: 1
+  val_batch_size: 4
   remote: false
   image_size: [640, 640]
-  workers: 4
+  workers: 8
   mosaic: true
 
 train:
@@ -24,13 +30,14 @@ train:
   trainer:
     epochs: 1
     input_size: [3, 640, 640]
-    profiler: simple
+    profiler: null
     grad_batches: 4
     train_batches: 0.1
     val_batches: 0.1
     accelerator: gpu
     devices: 1
     seed: 11
+    precision: high
 
 
 

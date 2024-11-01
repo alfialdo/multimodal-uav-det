@@ -13,7 +13,7 @@ from ._helper import load_json, load_attributes, connect_sftp, create_mosaic_4_i
 from utils.datatype import BatchData
 
 class AntiUAVDataset(Dataset):
-    def __init__(self, root_dir, transform, remote=None, mosaic=False, img_size=(640, 640)):
+    def __init__(self, root_dir, transform=None, remote=None, mosaic=False, img_size=(640, 640)):
         self.data_set = os.path.basename(root_dir)
         self.remote = remote
         self.data = self.__load_data(root_dir)
@@ -22,7 +22,7 @@ class AntiUAVDataset(Dataset):
         self.img_size = img_size
 
     def __len__(self):
-        return len(self.data) // 4
+        return len(self.data) // 2
     
 
     def __getitem__(self, idx):
@@ -38,18 +38,15 @@ class AntiUAVDataset(Dataset):
         else:
             row = self.data.iloc[idx]
             img = self.__load_image(row.img_path)
-            bboxes = [row.gt_rect]
+            bboxes = row.gt_rect.unsqueeze(0)
             labels = [1]
 
         # Apply necessary transforms to the image
-        results = self.transform(image=img, bboxes=bboxes, labels=labels)
-        bbox = torch.tensor(results['bboxes']).squeeze(0)
-            
-        return BatchData(
-            image=results['image'], 
-            bbox=bbox, 
-            # obj=torch.tensor(labels)
-        )
+        if self.transform:
+            results = self.transform(image=img, bboxes=bboxes, labels=labels)
+            img, bboxes = results['image'], torch.from_numpy(results['bboxes']) 
+        
+        return BatchData(image=img, bbox=bboxes)
 
     def __load_image(self, img_path):
 

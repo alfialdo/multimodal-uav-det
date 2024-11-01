@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 
 import matplotlib.pyplot as plt
 
+import torch
 from torch.utils.data import DataLoader
 
 
@@ -207,13 +208,14 @@ def create_mosaic_4_img(images, bboxes, target_size=(640, 640)):
         if x1 >= x2 or y1 >= y2:
             continue
 
-        updated_bboxes.append([x1, y1, x2, y2])
+        updated_bboxes.append(torch.tensor([x1, y1, x2, y2]))
     
         # Resize and paste the image to placeholder
         img_resized = cv2.resize(img, (img_width, img_height), interpolation=cv2.INTER_LANCZOS4)
         mosaic[y:y+img_height, x:x+img_width] = img_resized
 
         if len(updated_bboxes) >= 4:
+            updated_bboxes = torch.stack(updated_bboxes)
             return mosaic, updated_bboxes
             
         i += 1
