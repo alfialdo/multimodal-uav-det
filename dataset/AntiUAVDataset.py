@@ -22,7 +22,7 @@ class AntiUAVDataset(Dataset):
         self.img_size = img_size
 
     def __len__(self):
-        return len(self.data) // 2
+        return len(self.data) // 4
     
 
     def __getitem__(self, idx):
@@ -45,6 +45,7 @@ class AntiUAVDataset(Dataset):
         if self.transform:
             results = self.transform(image=img, bboxes=bboxes, labels=labels)
             img, bboxes = results['image'], torch.from_numpy(results['bboxes']) 
+
         
         return BatchData(image=img, bbox=bboxes)
 
@@ -98,9 +99,10 @@ class AntiUAVDataset(Dataset):
         if self.remote:
             sftp.close()
 
-        # Filter images that not bounding box
+        # Filter images that not have bounding box
         df = pd.concat(df, ignore_index=True)
-        df = df[df.exist == 1].reset_index(drop=True)
+        df = df[df.exist == 1]
+        df = df.loc[df.gt_rect.apply(lambda x: (x[2] > 0) and (x[3] > 0))].reset_index(drop=True)
 
         # Transform bbox to xyxy
         df['gt_rect'] = df.gt_rect.apply(lambda x: box_convert(torch.tensor(x), 'xywh', 'xyxy').squeeze(0))
