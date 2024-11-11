@@ -22,22 +22,24 @@ class AntiUAVDataset(Dataset):
         self.img_size = img_size
 
     def __len__(self):
-        return len(self.data) // 4
+        return len(self.data)
     
 
     def __getitem__(self, idx):
         if self.mosaic:
-            total_img = 10
-            rows = self.data.sample(total_img)
-
+            rows = self.data.sample(4)
             images = [self.__load_image(x) for x in rows.img_path]
             bboxes = rows.gt_rect.tolist()
             img, bboxes = create_mosaic_4_img(images, bboxes, target_size=self.img_size)
             labels = [1] * len(bboxes)
 
-        else:
+        else:           
             row = self.data.iloc[idx]
-            img = self.__load_image(row.img_path)
+            if row.cam_type == 'infrared':
+                img = self.__load_image(row.img_path, grayscale=True)
+            else:
+                img = self.__load_image(row.img_path)
+
             bboxes = row.gt_rect.unsqueeze(0)
             labels = [1]
 
@@ -49,7 +51,7 @@ class AntiUAVDataset(Dataset):
         
         return BatchData(image=img, bbox=bboxes)
 
-    def __load_image(self, img_path):
+    def __load_image(self, img_path, grayscale=False):
 
         if self.remote:
             with connect_sftp() as sftp:
@@ -60,6 +62,9 @@ class AntiUAVDataset(Dataset):
                     img.load()
         else:
             img = Image.open(img_path)
+
+        if grayscale:
+            img = img.convert('L')
 
         return np.array(img)
         
