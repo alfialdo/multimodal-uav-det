@@ -9,6 +9,7 @@ import einops
 
 from utils.datatype import DetectionResults, BatchData
 from utils.metrics import bbox_loss, objectness_loss, calculate_ap, filter_high_iou_bboxes
+from deprecated import deprecated
 
 # Custom Module
 class ConvModule(pl.LightningModule):
@@ -309,6 +310,7 @@ class RTMHead(pl.LightningModule):
         return outs
 
 
+@deprecated(reason="INVALID MODEL CONFIGURATION")
 class RTMUAVDet(pl.LightningModule):
     def __init__(self, input_size, anchors, learning_rate, optimizer='Adam', det_scales=[160, 80]):
         super().__init__()
