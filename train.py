@@ -1,4 +1,4 @@
-from model.RTMUAVDet import RTMUAVDet
+from model.ProposedModel import ProposedModel
 from dataset import create_dataloader
 
 import torch
@@ -46,6 +46,7 @@ def get_dataloader(config, test=False):
         tsfm=train_tsfm,
         mosaic=config.mosaic,
         batch_size=config.train_batch_size,
+        shuffle=True,
         **common_args
     )
     
@@ -61,25 +62,30 @@ def get_dataloader(config, test=False):
 
 @hydra.main(config_path="conf", config_name="config", version_base=None)
 def train(config):
+    # Load config
     dataset_cfg = config.dataset
     trainer_cfg = config.train.trainer
     hparams= config.train.hparams
     model = config.train.model
 
+    # Set weights precision
     torch.set_float32_matmul_precision(trainer_cfg.precision)
 
+    # Set fix seed
     if trainer_cfg.seed:
         seed_everything(trainer_cfg.seed, workers=True)
     
-    train_loader, val_loader = get_dataloader(dataset_cfg)
 
-    if model == "RTMUAVDet":
+    # Initialize model & dataloader
+    if model == "proposed":
         logger = CSVLogger(save_dir="logs", name=model)
-        anchors = torch.tensor(hparams.anchors)
-        model = RTMUAVDet(input_size=trainer_cfg.input_size, anchors=anchors, learning_rate=hparams.lr, optimizer=hparams.optim, det_scales=hparams.det_scales)
+        model = ProposedModel(input_size=trainer_cfg.input_size, hparams=hparams)
     else:
         raise ValueError(f"Model {model} not supported")
+    
+    train_loader, val_loader = get_dataloader(dataset_cfg)
 
+    # Intitialize trainer
     trainer = pl.Trainer(
         logger=logger,
         max_epochs=trainer_cfg.epochs,

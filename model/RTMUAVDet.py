@@ -152,7 +152,7 @@ class MDyEncoder(pl.LightningModule):
         
         self.group_norm_out = nn.GroupNorm(num_groups=1, num_channels=in_channels, eps=1e-5, affine=True)
 
-        # TODO: validate mlp conv layer position
+        # XTODO: validate mlp conv layer position
         self.channel_mlp = nn.Sequential(
             nn.Conv2d(in_channels, in_channels , kernel_size=(1,1)),
             nn.GELU(),
@@ -178,7 +178,7 @@ class MDyEncoder(pl.LightningModule):
 
         x = self.channel_mlp(x)
 
-        # TODO: bug when adding with last residual
+        # XTODO: bug when adding with last residual
         # x = torch.add(x, residual)
 
         return x
@@ -322,7 +322,7 @@ class RTMUAVDet(pl.LightningModule):
 
         self.backbone = nn.ModuleDict(dict(
             MDyCSP_1=nn.Sequential(
-                # TODO: increase stem layer output channel?
+                # XTODO: increase stem layer output channel?
                 StemLayer(input_size[0], 32),
                 MDyCSPModule(in_channels=32, out_channels=128, dy_channel_size=128),
             ),

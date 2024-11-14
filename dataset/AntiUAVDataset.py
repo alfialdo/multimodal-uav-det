@@ -45,12 +45,10 @@ class AntiUAVDataset(Dataset):
             labels = [1]
 
         # Apply necessary transforms to the image
-        # BUG: bbox missing after transform
         if self.transform:
             results = self.transform(image=img, bboxes=bboxes, labels=labels)
             img, bboxes = results['image'], torch.from_numpy(results['bboxes'])
 
-        # BUG: cannot collate custom datatype: BatchData
         return dict(image=img, bbox=bboxes)
 
     def __load_image(self, img_path, grayscale=False):

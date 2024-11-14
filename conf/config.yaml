@@ -10,25 +10,29 @@ hydra:
 
 dataset:
   root_dir: /home/aldo/opt/dataset/Anti-UAV-RGBT
-  train_batch_size: 1
-  val_batch_size: 4
+  train_batch_size: 8
+  val_batch_size: 8
   remote: false
   image_size: [640, 640]
-  workers: 8
-  mosaic: true
+  workers: 2
+  mosaic: false
 
 train:
-  model: RTMUAVDet
+  model: proposed
   hparams:
     anchors: [
-      [[10, 13], [16, 30], [33, 23]], # x1: small scale
-      [[30, 61], [62, 45], [59, 119]] # x2: medium scale
+      [[29, 23], [48, 30], [67, 38]], # x0: small scale
+      [[91, 54], [120, 75], [157, 60]], # x1: medium scale
+      [[199, 73], [315, 92], [268, 182]] # x2: large scale
     ] 
-    det_scales: [160, 80]
+    head_scales: [2, 4, 8] # x0, x1, x2
     lr: 0.001
-    optim: SGD
+    attention_temperature: 20
+    optim: Adam
+    num_dy_conv: 3
+    dy_kernel_size: 3
   trainer:
-    epochs: 10
+    epochs: 4
     input_size: [3, 640, 640]
     profiler: null
     grad_batches: 4
