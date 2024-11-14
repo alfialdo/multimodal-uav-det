@@ -11,6 +11,8 @@ import matplotlib.pyplot as plt
 import torch
 from torch.utils.data import DataLoader
 
+from utils.datatype import BatchData
+
 
 def load_json(path, remote_client=None):
     """
@@ -106,6 +108,23 @@ def connect_sftp():
     return sftp_client
 
 
+def custom_collate_fn(batch):
+    images = []
+    bboxes = []
+
+    for item in batch:
+        if item['bbox'].numel() == 0:  # Check if bbox is not empty
+            continue
+        
+        images.append(item['image'])
+        bboxes.append(item['bbox'])
+
+    # Convert lists to tensors
+    images = torch.stack(images)
+    bboxes = torch.stack(bboxes)
+
+    return BatchData(image=images, bbox=bboxes)
+
 
 def create_dataloader(dir_path, batch_size, shuffle=False, tsfm=None, remote=None, workers=4, mosaic=False, img_size=(640, 640)):
     """
@@ -127,7 +146,7 @@ def create_dataloader(dir_path, batch_size, shuffle=False, tsfm=None, remote=Non
     from .AntiUAVDataset import AntiUAVDataset
     dataset = AntiUAVDataset(root_dir=dir_path, transform=tsfm, remote=remote, mosaic=mosaic, img_size=img_size)
 
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=workers)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=workers, collate_fn=custom_collate_fn)
 
     return dataloader
 
@@ -175,6 +194,23 @@ def plot_sample_data(dataloader):
 
 
 def create_mosaic_4_img(images, bboxes, target_size=(640, 640)):
+    """
+    Create a mosaic image from 4 input images and their corresponding bounding boxes.
+
+    Args:
+        images (list of np.ndarray): List of 4 images to be combined into a mosaic.
+        bboxes (list of list of float): List of bounding boxes corresponding to each image. 
+                                        Each bounding box should be in the format [x1, y1, x2, y2].
+        target_size (tuple of int, optional): The size of the output mosaic image. Default is (640, 640).
+
+    Returns:
+        tuple: A tuple containing:
+            - np.ndarray: The mosaic image.
+            - torch.Tensor: The updated bounding boxes after resizing and positioning in the mosaic.
+
+    Raises:
+        ValueError: If the number of images or bounding boxes is less than 4 or if they do not match.
+    """
     if len(images) < 4 or len(images) != len(bboxes):
         raise ValueError("Need at least 4 images and 4 sets of bounding boxes to create a mosaic.")
     

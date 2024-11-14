@@ -35,8 +35,9 @@ class AntiUAVDataset(Dataset):
 
         else:           
             row = self.data.iloc[idx]
+            # TODO: check if we can use 1D for infrared images (grayscale=True)
             if row.cam_type == 'infrared':
-                img = self.__load_image(row.img_path, grayscale=True)
+                img = self.__load_image(row.img_path, grayscale=False)
             else:
                 img = self.__load_image(row.img_path)
 
@@ -44,12 +45,13 @@ class AntiUAVDataset(Dataset):
             labels = [1]
 
         # Apply necessary transforms to the image
+        # BUG: bbox missing after transform
         if self.transform:
             results = self.transform(image=img, bboxes=bboxes, labels=labels)
-            img, bboxes = results['image'], torch.from_numpy(results['bboxes']) 
+            img, bboxes = results['image'], torch.from_numpy(results['bboxes'])
 
-        
-        return BatchData(image=img, bbox=bboxes)
+        # BUG: cannot collate custom datatype: BatchData
+        return dict(image=img, bbox=bboxes)
 
     def __load_image(self, img_path, grayscale=False):
 
