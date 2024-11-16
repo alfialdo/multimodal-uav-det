@@ -4,6 +4,8 @@ import json
 import paramiko
 import numpy as np
 import cv2
+import joblib
+from typing import Tuple
 from dotenv import load_dotenv
 
 import matplotlib.pyplot as plt
@@ -256,4 +258,19 @@ def create_mosaic_4_img(images, bboxes, target_size=(640, 640)):
             
         i += 1
         
+
+def load_dataloader(train_path: str, val_path: str):
+    """
+    Load saved train and validation dataloaders from a pickle file using joblib
+
+    Args:
+        train_path: Path to the pickle file containing saved train dataloader
+        val_path: Path to the pickle file containing saved validation dataloader
+        
+    Returns:
+        Tuple containing (train_loader, val_loader)
+    """
+    train_loader = joblib.load(train_path)
+    val_loader = joblib.load(val_path)
     
+    return train_loader, val_loader

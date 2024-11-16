@@ -1,103 +1,68 @@
-from model.ProposedModel import ProposedModel
-from dataset import create_dataloader
-
 import torch
 import pytorch_lightning as pl
 from pytorch_lightning import seed_everything
-from pytorch_lightning.loggers import CSVLogger
-import albumentations as A
-from albumentations.pytorch import ToTensorV2
+from pytorch_lightning.callbacks import ModelCheckpoint
 
-import hydra
-import os
+from dvclive.lightning import DVCLiveLogger
+import dvc.api as dvc
+from dvclive import Live
 
-def get_dataloader(config, test=False):
+from model.ProposedModel import ProposedModel
+from dataset import load_dataloader
+from utils.datatype import Config
 
-    common_args = dict(
-        remote=config.remote,
-        img_size=config.image_size,
-    )
-
-    train_tsfm = A.Compose([
-        A.Resize(common_args['img_size'][0], common_args['img_size'][1]),
-        A.Affine(scale=(0.8, 1.2), translate_percent=(-0.1, 0.1), rotate=(-30, 30), shear=(-15, 15)),
-        A.ToFloat(max_value=255.0), 
-        ToTensorV2(),
-    ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['labels']))
-
-    val_tsfm = A.Compose([
-        A.Resize(common_args['img_size'][0], common_args['img_size'][1]),
-        A.ToFloat(max_value=255.0), 
-        ToTensorV2(),
-    ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['labels']))
-
-    if test:
-        test_loader = create_dataloader(
-            dir_path=os.path.join(config.root_dir, "test"), 
-            tsfm=val_tsfm,
-            batch_size=config.val_batch_size,
-            **common_args
-        )
-
-        return test_loader
-
-    train_loader = create_dataloader(
-        dir_path=os.path.join(config.root_dir, "train"),
-        tsfm=train_tsfm,
-        mosaic=config.mosaic,
-        batch_size=config.train_batch_size,
-        shuffle=True,
-        **common_args
-    )
-    
-    val_loader = create_dataloader(
-        dir_path=os.path.join(config.root_dir, "val"),
-        tsfm=val_tsfm,
-        batch_size=config.val_batch_size,
-        **common_args
-    )
-
-    return train_loader, val_loader
-
-
-@hydra.main(config_path="conf", config_name="config", version_base=None)
-def train(config):
+def train(config, train_loader, val_loader):
     # Load config
-    dataset_cfg = config.dataset
     trainer_cfg = config.train.trainer
     hparams= config.train.hparams
-    model = config.train.model
+    model_name = config.train.model
+    ckpt_cfg = config.train.checkpoint
 
     # Set weights precision
     torch.set_float32_matmul_precision(trainer_cfg.precision)
 
-    # Set fix seed
-    if trainer_cfg.seed:
-        seed_everything(trainer_cfg.seed, workers=True)
-    
-
     # Initialize model & dataloader
-    if model == "proposed":
-        logger = CSVLogger(save_dir="logs", name=model)
+    if model_name == "proposed":
         model = ProposedModel(input_size=trainer_cfg.input_size, hparams=hparams)
     else:
         raise ValueError(f"Model {model} not supported")
     
-    train_loader, val_loader = get_dataloader(dataset_cfg)
-
-    # Intitialize trainer
-    trainer = pl.Trainer(
-        logger=logger,
-        max_epochs=trainer_cfg.epochs,
-        accelerator=trainer_cfg.accelerator,
-        devices=trainer_cfg.devices,
-        profiler=trainer_cfg.profiler,
-        accumulate_grad_batches=trainer_cfg.grad_batches,
-        limit_train_batches=trainer_cfg.train_batches,
-        limit_val_batches=trainer_cfg.val_batches
+    # Initialize checkpoint callback
+    checkpoint_callback = ModelCheckpoint(
+        filename='best-{epoch:02d}-{val_loss:.4f}',
+        dirpath=ckpt_cfg.dir,
+        monitor=ckpt_cfg.monitor,
+        mode=ckpt_cfg.mode,
+        save_last=True
     )
+    
+    # Initialize trainer
+    with Live(dvcyaml=False) as live:
+        trainer = pl.Trainer(
+            logger=DVCLiveLogger(log_model=False, experiment=live),
+            callbacks=[checkpoint_callback],
+            max_epochs=trainer_cfg.epochs,
+            accelerator=trainer_cfg.accelerator,
+            devices=trainer_cfg.devices,
+            profiler=trainer_cfg.profiler,
+            accumulate_grad_batches=trainer_cfg.grad_batches,
+            limit_train_batches=trainer_cfg.train_batches,
+            limit_val_batches=trainer_cfg.val_batches,
+            val_check_interval=trainer_cfg.val_check_interval,
+            check_val_every_n_epoch=None
+        )
 
-    trainer.fit(model, train_loader, val_loader)
+        trainer.fit(model, train_loader, val_loader)
 
 if __name__ == "__main__":
-    train()
+    config = Config(dvc.params_show())
+
+    if config.train.seed:
+        seed_everything(config.train.seed, workers=True)
+
+    train_loader, val_loader = load_dataloader(
+        config.dataset.train_loader_path,
+        config.dataset.val_loader_path
+    )
+
+    train(config, train_loader, val_loader)

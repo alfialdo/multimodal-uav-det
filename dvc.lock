@@ -1,0 +1,128 @@
+schema: '2.0'
+stages:
+  prepare_dataloader:
+    cmd: python prepare_dataloader.py
+    deps:
+    - path: prepare_dataloader.py
+      hash: md5
+      md5: e6fcbd67e33c38dbcacd1f70c826e7e5
+      size: 2162
+    params:
+      params.yaml:
+        dataset:
+          root_dir: /home/aldo/opt/dataset/Anti-UAV-RGBT
+          train_loader_path: data/train_dataloader.pickle
+          val_loader_path: data/val_dataloader.pickle
+          train_batch_size: 8
+          val_batch_size: 8
+          remote: false
+          image_size:
+          - 640
+          - 640
+          workers: 16
+          mosaic: false
+    outs:
+    - path: data/train_dataloader.pickle
+      hash: md5
+      md5: 6de92c3e4ac8f8be2b969217cefc8949
+      size: 139796748
+    - path: data/val_dataloader.pickle
+      hash: md5
+      md5: 61cc13b5ca9a38af1bd699808918fa6c
+      size: 56770405
+  train:
+    cmd: python train.py
+    deps:
+    - path: data/train_dataloader.pickle
+      hash: md5
+      md5: 6de92c3e4ac8f8be2b969217cefc8949
+      size: 139796748
+    - path: data/val_dataloader.pickle
+      hash: md5
+      md5: 61cc13b5ca9a38af1bd699808918fa6c
+      size: 56770405
+    - path: train.py
+      hash: md5
+      md5: 55ccda007d9a910f6a418b07f4ae966a
+      size: 2197
+    params:
+      params.yaml:
+        dataset:
+          root_dir: /home/aldo/opt/dataset/Anti-UAV-RGBT
+          train_loader_path: data/train_dataloader.pickle
+          val_loader_path: data/val_dataloader.pickle
+          train_batch_size: 8
+          val_batch_size: 8
+          remote: false
+          image_size:
+          - 640
+          - 640
+          workers: 16
+          mosaic: false
+        train:
+          seed: 11
+          model: proposed
+          hparams:
+            anchors:
+            - - - 29
+                - 23
+              - - 48
+                - 30
+              - - 67
+                - 38
+            - - - 91
+                - 54
+              - - 120
+                - 75
+              - - 157
+                - 60
+            - - - 199
+                - 73
+              - - 315
+                - 92
+              - - 268
+                - 182
+            head_scales:
+            - 2
+            - 4
+            - 8
+            lr: 0.0001
+            attention_temperature: 20
+            optim: Adam
+            num_dy_conv:
+            - 3
+            - 3
+            - 3
+            dy_kernel_size:
+            - 3
+            - 3
+            - 3
+          trainer:
+            epochs: 2
+            input_size:
+            - 3
+            - 640
+            - 640
+            profiler:
+            grad_batches: 4
+            train_batches: 0.001
+            val_batches: 0.001
+            val_check_interval: 50
+            accelerator: gpu
+            devices: 1
+            precision: high
+          checkpoint:
+            dir: logs/checkpoints
+            monitor: val_loss
+            mode: min
+    outs:
+    - path: dvclive/plots
+      hash: md5
+      md5: 1a65b35ce1291fbe35b613ebbcff59ee.dir
+      size: 47
+      nfiles: 2
+    - path: logs/checkpoints
+      hash: md5
+      md5: d2baac4ac0a3ce1d8639f58093c4c55e.dir
+      size: 134466772
+      nfiles: 2

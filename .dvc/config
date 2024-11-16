@@ -1,0 +1,6 @@
+[core]
+    remote = remote-storage
+    autostage = true
+['remote "remote-storage"']
+    url = ssh://user@url:22/path
+    ask_password = true

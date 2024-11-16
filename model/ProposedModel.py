@@ -39,14 +39,14 @@ class InputStemLayer(pl.LightningModule):
 ### BACKBONE ###
 # Create SOE Module - Small-object Enchanement Module
 class DynamicSOEM(pl.LightningModule):
-    def __init__(self, in_channels, num_dy_conv=9, dy_kernel_size=3, downsample_factor=2, reduction_ratio=2): 
+    def __init__(self, in_channels, num_dy_conv=3, dy_kernel_size=3, downsample_factor=2, reduction_ratio=2): 
         super().__init__()
         self.k = downsample_factor
 
         # Attention Module
         # TODO: validate num of hidden features
         in_attn = (downsample_factor ** 2) * in_channels
-        hidden_features = max(1, in_attn//3)
+        hidden_features = max(1, in_attn//4)
         self.attention = nn.Sequential(
             nn.AdaptiveAvgPool2d(1),
             nn.Flatten(),
@@ -57,15 +57,12 @@ class DynamicSOEM(pl.LightningModule):
 
         self.attn_softmax = nn.Softmax(dim=-1)
 
-        # TODO: Check if we need to reduce the channel in superposition conv
         # Dynamic conv
         self.dy_convs = nn.ModuleList([
             nn.Conv2d(in_attn, in_attn//reduction_ratio, kernel_size=dy_kernel_size, padding=dy_kernel_size//2, stride=1)
             for _ in range(num_dy_conv)
         ])
 
-        # TODO: or reduce the channel using final Conv Module?
-        # self.conv = ConvModule(in_channels, in_channels//reduction_ratio, kernel_size=(1,1), stride=(1,1), padding=(1,1), bias=False, activation='silu')
         self.bn = nn.BatchNorm2d(num_features= in_attn//reduction_ratio, affine=True)
         self.silu = nn.SiLU(inplace=True)
 
@@ -142,13 +139,13 @@ class ProposedModel(BaseModel):
 
         x_in_scales = [stem_out_channels, stem_out_channels * 2, stem_out_channels * 4]
 
-        # TODO: check if the num of dy_conv is different for each scale
-        self.backbone = nn.ModuleList([
-            DynamicSOEM(in_channels=x_in_scales[0], num_dy_conv=hparams.num_dy_conv * 3, dy_kernel_size=hparams.dy_kernel_size),
-            DynamicSOEM(in_channels=x_in_scales[1], num_dy_conv=hparams.num_dy_conv * 2, dy_kernel_size=hparams.dy_kernel_size),
-            DynamicSOEM(in_channels=x_in_scales[2], num_dy_conv=hparams.num_dy_conv, dy_kernel_size=hparams.dy_kernel_size)
-        ])
-
+        assert len(hparams.num_dy_conv) == len(hparams.dy_kernel_size), 'Num of dy_conv and dy_kernel_size must be the same'
+        self.backbone = nn.ModuleList()
+        for i, (n_dy_conv, k_size) in enumerate(zip(hparams.num_dy_conv, hparams.dy_kernel_size)):
+            self.backbone.append(
+                DynamicSOEM(in_channels=x_in_scales[i], num_dy_conv=n_dy_conv, dy_kernel_size=k_size)
+            )
+       
         x_out_channels = [x*2 for x in x_in_scales]
         self.neck = SimplifiedFPN(x_out_channels)
         self.yolo_head = YOLOHead(x_out_channels, hparams.anchors, input_size)
@@ -165,7 +162,7 @@ class ProposedModel(BaseModel):
         del x_features
 
         outs = self.yolo_head([x0, x1, x2])
-        del x0, x1, x2
+        del x0, x1, x2 
 
         return outs
 
@@ -176,6 +173,7 @@ class ProposedModel(BaseModel):
 
         return loss
 
+    # TODO: add correct AP and AR metrics calculation here
     def validation_step(self, batch:BatchData, batch_idx):
         outs = self.forward(batch.image)
         loss, _ = self.yolo_head.compute_metrics(outs, batch, self.head_scales)
