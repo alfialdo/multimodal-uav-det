@@ -5,8 +5,8 @@ stages:
     deps:
     - path: prepare_dataloader.py
       hash: md5
-      md5: e6fcbd67e33c38dbcacd1f70c826e7e5
-      size: 2162
+      md5: d7a8a6b6438f3af55f84fdc7d37aa0d8
+      size: 2184
     params:
       params.yaml:
         dataset:
@@ -24,23 +24,23 @@ stages:
     outs:
     - path: data/train_dataloader.pickle
       hash: md5
-      md5: 6de92c3e4ac8f8be2b969217cefc8949
-      size: 139796748
+      md5: 4a5cf524a2a498261bc326fa515e3b3b
+      size: 139796705
     - path: data/val_dataloader.pickle
       hash: md5
-      md5: 61cc13b5ca9a38af1bd699808918fa6c
-      size: 56770405
+      md5: f9308593648c8c9827f38e56fdfdf868
+      size: 56770523
   train:
     cmd: python train.py
     deps:
     - path: data/train_dataloader.pickle
       hash: md5
-      md5: 6de92c3e4ac8f8be2b969217cefc8949
-      size: 139796748
+      md5: 4a5cf524a2a498261bc326fa515e3b3b
+      size: 139796705
     - path: data/val_dataloader.pickle
       hash: md5
-      md5: 61cc13b5ca9a38af1bd699808918fa6c
-      size: 56770405
+      md5: f9308593648c8c9827f38e56fdfdf868
+      size: 56770523
     - path: train.py
       hash: md5
       md5: 55ccda007d9a910f6a418b07f4ae966a
@@ -105,9 +105,9 @@ stages:
             - 640
             profiler:
             grad_batches: 4
-            train_batches: 0.001
-            val_batches: 0.001
-            val_check_interval: 50
+            train_batches: 1.0
+            val_batches: 0.25
+            val_check_interval: 4000
             accelerator: gpu
             devices: 1
             precision: high
@@ -118,11 +118,11 @@ stages:
     outs:
     - path: dvclive/plots
       hash: md5
-      md5: 1a65b35ce1291fbe35b613ebbcff59ee.dir
-      size: 47
-      nfiles: 2
+      md5: bbedee1c3b0b342c046bfbb053c51935.dir
+      size: 12228
+      nfiles: 3
     - path: logs/checkpoints
       hash: md5
-      md5: d2baac4ac0a3ce1d8639f58093c4c55e.dir
-      size: 134466772
+      md5: 00f3e6886d1230ad875f8852a7e484a0.dir
+      size: 134466964
       nfiles: 2
