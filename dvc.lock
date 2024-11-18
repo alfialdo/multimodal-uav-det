@@ -24,23 +24,23 @@ stages:
     outs:
     - path: data/train_dataloader.pickle
       hash: md5
-      md5: 4a5cf524a2a498261bc326fa515e3b3b
-      size: 139796705
+      md5: 370bb005be9b9f838276dbfd3e92a473
+      size: 139796676
     - path: data/val_dataloader.pickle
       hash: md5
-      md5: f9308593648c8c9827f38e56fdfdf868
-      size: 56770523
+      md5: f2796d0d899cbadece8b7e79e089b3eb
+      size: 56770473
   train:
     cmd: python train.py
     deps:
     - path: data/train_dataloader.pickle
       hash: md5
-      md5: 4a5cf524a2a498261bc326fa515e3b3b
-      size: 139796705
+      md5: 370bb005be9b9f838276dbfd3e92a473
+      size: 139796676
     - path: data/val_dataloader.pickle
       hash: md5
-      md5: f9308593648c8c9827f38e56fdfdf868
-      size: 56770523
+      md5: f2796d0d899cbadece8b7e79e089b3eb
+      size: 56770473
     - path: train.py
       hash: md5
       md5: 55ccda007d9a910f6a418b07f4ae966a
@@ -86,8 +86,8 @@ stages:
             - 2
             - 4
             - 8
-            lr: 0.0001
-            attention_temperature: 20
+            lr: 0.001
+            attention_temperature: 30
             optim: Adam
             num_dy_conv:
             - 3
@@ -97,6 +97,13 @@ stages:
             - 3
             - 3
             - 3
+            loss_balancing:
+              obj_scales_w:
+              - 2.0
+              - 1.0
+              - 0.5
+              bbox_w: 4.0
+              objectness_w: 1.0
           trainer:
             epochs: 2
             input_size:
@@ -118,11 +125,11 @@ stages:
     outs:
     - path: dvclive/plots
       hash: md5
-      md5: bbedee1c3b0b342c046bfbb053c51935.dir
-      size: 12228
+      md5: ea6f8fffb5ed3873317418cb6bb4f9b0.dir
+      size: 12053
       nfiles: 3
     - path: logs/checkpoints
       hash: md5
-      md5: 00f3e6886d1230ad875f8852a7e484a0.dir
-      size: 134466964
+      md5: efa97c6487dbe7e070d680d05f3ca6d1.dir
+      size: 134467860
       nfiles: 2

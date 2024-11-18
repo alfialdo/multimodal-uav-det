@@ -20,7 +20,6 @@ class AdaptiveStemLayer(pl.LightningModule):
         self.rgb_conv = ConvModule(3, out_channels, kernel_size=(1,1), bias=False, activation='silu')
         
     def forward(self, x):
-        # TODO: check if we need to use dynamic channel?
         if x.size(1) == 1:
             x = self.gray_conv(x)
         else:
@@ -44,7 +43,6 @@ class DynamicSOEM(pl.LightningModule):
         self.k = downsample_factor
 
         # Attention Module
-        # TODO: validate num of hidden features
         in_attn = (downsample_factor ** 2) * in_channels
         hidden_features = max(1, in_attn//4)
         self.attention = nn.Sequential(
@@ -148,7 +146,7 @@ class ProposedModel(BaseModel):
        
         x_out_channels = [x*2 for x in x_in_scales]
         self.neck = SimplifiedFPN(x_out_channels)
-        self.yolo_head = YOLOHead(x_out_channels, hparams.anchors, input_size)
+        self.yolo_head = YOLOHead(x_out_channels, input_size, hparams.anchors, hparams.loss_balancing)
 
     def forward(self, x, attn_temp=1.0):
         x = self.input_stem(x)

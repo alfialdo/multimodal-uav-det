@@ -19,11 +19,15 @@ train:
       [[199, 73], [315, 92], [268, 182]] # x2: large scale
     ] 
     head_scales: [2, 4, 8] # x0, x1, x2
-    lr: 0.0001
-    attention_temperature: 20
+    lr: 0.001
+    attention_temperature: 30
     optim: Adam
     num_dy_conv: [3, 3, 3]
     dy_kernel_size: [3, 3, 3]
+    loss_balancing:
+      obj_scales_w: [2.0, 1.0, 0.5]
+      bbox_w: 4.0
+      objectness_w: 1.0
   trainer:
     epochs: 2
     input_size: [3, 640, 640]
