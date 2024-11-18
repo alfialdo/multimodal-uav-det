@@ -1,0 +1,38 @@
+stages:
+  prepare_dataloader:
+    cmd: python prepare_dataloader.py
+    deps:
+    - prepare_dataloader.py
+    params:
+    - dataset
+    outs:
+    - ${dataset.train_loader_path}
+    - ${dataset.val_loader_path}
+
+  train:
+    cmd: python train.py
+    deps:
+    - ${dataset.train_loader_path}
+    - ${dataset.val_loader_path}
+    - train.py
+    params:
+    - dataset
+    - train
+    outs:
+    - dvclive/plots
+    - logs/checkpoints
+
+
+metrics:
+- dvclive/metrics.json
+
+
+plots:
+- dvclive/plots/metrics/train/loss.tsv:
+    title: Train Loss
+    x: step
+    y: loss
+- dvclive/plots/metrics/val/loss.tsv:
+    title: Validation Loss
+    x: step
+    y: loss
