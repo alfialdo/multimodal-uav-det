@@ -41,7 +41,7 @@ def bbox_loss(preds, targets):
     return avg_loss
 
 
-def objectness_loss(preds, targets, reduction='mean'):
+def objectness_loss(preds, targets, obj_scale_w, reduction='mean'):
     """
     Calculate binary cross entropy loss between predicted objectness scores and target values.
     
@@ -59,7 +59,7 @@ def objectness_loss(preds, targets, reduction='mean'):
     # Ensure target is on same device as pred
     avg_loss = F.binary_cross_entropy(preds, targets, reduction=reduction)
 
-    return avg_loss
+    return (avg_loss * obj_scale_w)
 
 
 

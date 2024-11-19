@@ -63,13 +63,17 @@ class BBoxHead(pl.LightningModule):
         return x
 
 class YOLOHead(pl.LightningModule)  :
-    def __init__(self, x_channels:List[int], anchors, input_size):
+    def __init__(self, x_channels:List[int], input_size, anchors, loss_balancing):
         super().__init__()
         # x_channels --> [x0_scale, x1_scale, x2_scale]
         self.input_scale = input_size[-1]
         self.anchors = torch.tensor(anchors)
         self.detection_head = nn.ModuleList()
         n_anchors = len(anchors[0])
+
+        self.obj_scales_w = loss_balancing.obj_scales_w
+        self.bbox_w = loss_balancing.bbox_w
+        self.objectness_w = loss_balancing.objectness_w
 
         for x_in_channel in x_channels:
             self.detection_head.append(nn.ModuleDict(dict(
@@ -95,7 +99,6 @@ class YOLOHead(pl.LightningModule)  :
         
         return outs
     
-    
     def compute_metrics(self, outs:List[DetectionResults], batch:BatchData, head_scales:List[int], return_ap=False):
         device = outs[0].bbox.device
         batch_size = len(batch.bbox)
@@ -118,7 +121,7 @@ class YOLOHead(pl.LightningModule)  :
                 filtered_p_bbox, filtered_p_obj, t_obj = filter_high_iou_bboxes(p_bbox, p_obj, t_bbox)
 
                 # Calculate loss
-                total_loss += (bbox_loss(filtered_p_bbox, t_bbox) + objectness_loss(p_obj, t_obj))
+                total_loss += ((self.bbox_w * bbox_loss(filtered_p_bbox, t_bbox)) + (self.objectness_w * objectness_loss(p_obj, t_obj, self.obj_scales_w[head_idx])))
                 
                 if return_ap:
                     map = calculate_ap(filtered_p_bbox, filtered_p_obj, t_bbox)['map']
@@ -184,9 +187,18 @@ class BaseModel(pl.LightningModule):
             optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
         else:
             raise ValueError(f"Invalid optimizer: {self.optimizer}")
+        
+        scheduler = torch.optim.lr_scheduler.CyclicLR(
+            optimizer,
+            base_lr=self.learning_rate / 10,
+            max_lr=self.learning_rate,
+            step_size_up=2000,
+            mode='triangular2',
+            cycle_momentum=False
+        )
 
-        return optimizer    
-    
+        return dict(optimizer=optimizer, lr_scheduler=scheduler)
+        
     def training_step(self, batch:BatchData, batch_idx):
         outs = self.forward(batch.image)
         loss, _ = self.head.compute_metrics(outs, batch, self.head_scales)
