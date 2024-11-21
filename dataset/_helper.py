@@ -128,7 +128,7 @@ def custom_collate_fn(batch):
     return BatchData(image=images, bbox=bboxes)
 
 
-def create_dataloader(dir_path, batch_size, shuffle=False, tsfm=None, remote=None, workers=4, mosaic=False, img_size=(640, 640)):
+def create_dataloader(dir_path, batch_size, shuffle=False, tsfm=None, remote=None, workers=4, mosaic=False, img_size=(640, 640), seed=11):
     """
     Create a DataLoader for the AntiUAVDataset.
 
@@ -141,12 +141,13 @@ def create_dataloader(dir_path, batch_size, shuffle=False, tsfm=None, remote=Non
         workers (int, optional): Number of worker processes for data loading. Defaults to 4.
         mosaic (bool, optional): Whether to use mosaic augmentation. Defaults to False.
         img_size (tuple, optional): Target size (height, width) to resize images to. Defaults to (640, 640).
+        seed (int, optional): Random seed for shuffling the dataset. Defaults to 11.
 
     Returns:
         torch.utils.data.DataLoader: A DataLoader for the AntiUAVDataset.
     """
     from .AntiUAVDataset import AntiUAVDataset
-    dataset = AntiUAVDataset(root_dir=dir_path, transform=tsfm, remote=remote, mosaic=mosaic, img_size=img_size)
+    dataset = AntiUAVDataset(root_dir=dir_path, transform=tsfm, remote=remote, mosaic=mosaic, img_size=img_size, seed=seed)
 
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=workers, collate_fn=custom_collate_fn)
 

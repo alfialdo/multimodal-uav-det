@@ -13,13 +13,14 @@ from ._helper import load_json, load_attributes, connect_sftp, create_mosaic_4_i
 from utils.datatype import BatchData
 
 class AntiUAVDataset(Dataset):
-    def __init__(self, root_dir, transform=None, remote=None, mosaic=False, img_size=(640, 640)):
+    def __init__(self, root_dir, transform=None, remote=None, mosaic=False, img_size=(640, 640), seed=11):
         self.data_set = os.path.basename(root_dir)
         self.remote = remote
         self.data = self.__load_data(root_dir)
         self.transform = transform
         self.mosaic = mosaic
         self.img_size = img_size
+        self.seed = seed
 
     def __len__(self):
         return len(self.data)
@@ -111,6 +112,9 @@ class AntiUAVDataset(Dataset):
 
         # Transform bbox to xyxy
         df['gt_rect'] = df.gt_rect.apply(lambda x: box_convert(torch.tensor(x), 'xywh', 'xyxy').squeeze(0))
+
+        # Shuffle dataset
+        df = df.sample(frac=1, random_state=self.seed).reset_index(drop=True)
         
         return df
     
