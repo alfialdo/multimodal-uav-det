@@ -28,11 +28,13 @@ metrics:
 
 
 plots:
-- dvclive/plots/metrics/train/loss.tsv:
-    title: Train Loss
-    x: step
-    y: loss
-- dvclive/plots/metrics/val/loss.tsv:
-    title: Validation Loss
-    x: step
-    y: loss
+- Train Loss:
+    x:
+      dvclive/plots/metrics/train/loss.tsv: step
+    y:
+      dvclive/plots/metrics/train/loss.tsv: loss
+- Validation Loss:
+    x:
+      dvclive/plots/metrics/val/loss.tsv: step
+    y:
+      dvclive/plots/metrics/val/loss.tsv: loss

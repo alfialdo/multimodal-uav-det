@@ -13,7 +13,7 @@ stages:
           root_dir: /home/aldo/opt/dataset/Anti-UAV-RGBT
           train_loader_path: data/train_dataloader.pickle
           val_loader_path: data/val_dataloader.pickle
-          train_batch_size: 8
+          train_batch_size: 4
           val_batch_size: 8
           remote: false
           image_size:
@@ -24,23 +24,23 @@ stages:
     outs:
     - path: data/train_dataloader.pickle
       hash: md5
-      md5: 4a5cf524a2a498261bc326fa515e3b3b
-      size: 139796705
+      md5: 505162cd5e05cfbaa6179b3b76d11ceb
+      size: 139796606
     - path: data/val_dataloader.pickle
       hash: md5
-      md5: f9308593648c8c9827f38e56fdfdf868
-      size: 56770523
+      md5: 911959a4fce0d2802d7f99b7e8893307
+      size: 56770429
   train:
     cmd: python train.py
     deps:
     - path: data/train_dataloader.pickle
       hash: md5
-      md5: 4a5cf524a2a498261bc326fa515e3b3b
-      size: 139796705
+      md5: 505162cd5e05cfbaa6179b3b76d11ceb
+      size: 139796606
     - path: data/val_dataloader.pickle
       hash: md5
-      md5: f9308593648c8c9827f38e56fdfdf868
-      size: 56770523
+      md5: 911959a4fce0d2802d7f99b7e8893307
+      size: 56770429
     - path: train.py
       hash: md5
       md5: 55ccda007d9a910f6a418b07f4ae966a
@@ -51,7 +51,7 @@ stages:
           root_dir: /home/aldo/opt/dataset/Anti-UAV-RGBT
           train_loader_path: data/train_dataloader.pickle
           val_loader_path: data/val_dataloader.pickle
-          train_batch_size: 8
+          train_batch_size: 4
           val_batch_size: 8
           remote: false
           image_size:
@@ -87,8 +87,11 @@ stages:
             - 4
             - 8
             lr: 0.0001
-            attention_temperature: 20
-            optim: Adam
+            lr_scheduler: false
+            attention_temperature: 30
+            optim:
+              name: SGD
+              momentum: 0.1
             num_dy_conv:
             - 3
             - 3
@@ -97,6 +100,13 @@ stages:
             - 3
             - 3
             - 3
+            loss_balancing:
+              obj_scales_w:
+              - 2.0
+              - 1.0
+              - 0.5
+              bbox_w: 4.0
+              objectness_w: 1.0
           trainer:
             epochs: 2
             input_size:
@@ -104,9 +114,9 @@ stages:
             - 640
             - 640
             profiler:
-            grad_batches: 4
+            grad_batches: 1
             train_batches: 1.0
-            val_batches: 0.25
+            val_batches: 0.3
             val_check_interval: 4000
             accelerator: gpu
             devices: 1
@@ -118,11 +128,11 @@ stages:
     outs:
     - path: dvclive/plots
       hash: md5
-      md5: bbedee1c3b0b342c046bfbb053c51935.dir
-      size: 12228
+      md5: 5a50cfea8a671a899e42a4c63e288a2b.dir
+      size: 97697
       nfiles: 3
     - path: logs/checkpoints
       hash: md5
-      md5: 00f3e6886d1230ad875f8852a7e484a0.dir
-      size: 134466964
+      md5: fe59cf1c8eb1bd4d31f0716e97eb9b63.dir
+      size: 89655172
       nfiles: 2
