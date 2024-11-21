@@ -8,6 +8,7 @@ stages:
     outs:
     - ${dataset.train_loader_path}
     - ${dataset.val_loader_path}
+    - ${dataset.test_loader_path}
 
   train:
     cmd: python train.py

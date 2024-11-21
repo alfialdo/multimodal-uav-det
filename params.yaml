@@ -2,6 +2,7 @@ dataset:
   root_dir: /home/aldo/opt/dataset/Anti-UAV-RGBT
   train_loader_path: data/train_dataloader.pickle
   val_loader_path: data/val_dataloader.pickle
+  test_loader_path: data/test_dataloader.pickle
   train_batch_size: 4
   val_batch_size: 8
   remote: false

@@ -16,11 +16,11 @@ class AntiUAVDataset(Dataset):
     def __init__(self, root_dir, transform=None, remote=None, mosaic=False, img_size=(640, 640), seed=11):
         self.data_set = os.path.basename(root_dir)
         self.remote = remote
-        self.data = self.__load_data(root_dir)
+        self.seed = seed
         self.transform = transform
         self.mosaic = mosaic
         self.img_size = img_size
-        self.seed = seed
+        self.data = self.__load_data(root_dir)
 
     def __len__(self):
         return len(self.data)

@@ -9,7 +9,7 @@ import dvc.api as dvc
 from dataset import create_dataloader
 from utils.datatype import Config
 
-def get_dataloader(config, test=False, seed=11):
+def get_dataloader(config, seed=11):
 
     common_args = dict(
         remote=config.remote,
@@ -17,6 +17,7 @@ def get_dataloader(config, test=False, seed=11):
         seed=seed
     )
 
+    # Create transform functions
     train_tsfm = A.Compose([
         A.Resize(common_args['img_size'][0], common_args['img_size'][1]),
         A.Affine(scale=(0.8, 1.2), translate_percent=(-0.1, 0.1), rotate=(-30, 30), shear=(-15, 15)),
@@ -30,17 +31,8 @@ def get_dataloader(config, test=False, seed=11):
         ToTensorV2(),
     ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['labels']))
 
-    if test:
-        test_loader = create_dataloader(
-            dir_path=os.path.join(config.root_dir, "test"), 
-            tsfm=val_tsfm,
-            batch_size=config.val_batch_size,
-            **common_args
-        )
-        print('Created test data loader..')
 
-        return test_loader
-
+    # Create the data loaders
     train_loader = create_dataloader(
         dir_path=os.path.join(config.root_dir, "train"),
         tsfm=train_tsfm,
@@ -55,12 +47,19 @@ def get_dataloader(config, test=False, seed=11):
         dir_path=os.path.join(config.root_dir, "val"),
         tsfm=val_tsfm,
         batch_size=config.val_batch_size,
-        shuffle=True,
         **common_args
     )
     print('Created validation data loader..')
 
-    return train_loader, val_loader
+    test_loader = create_dataloader(
+        dir_path=os.path.join(config.root_dir, "test"), 
+        tsfm=val_tsfm,
+        batch_size=config.val_batch_size,
+        **common_args
+    )
+    print('Created test data loader..')
+
+    return train_loader, val_loader, test_loader
 
 if __name__ == "__main__":
     config = Config(dvc.params_show())
@@ -69,7 +68,8 @@ if __name__ == "__main__":
     if seed:
         seed_everything(seed, workers=True)
     
-    train_loader, val_loader = get_dataloader(config.dataset, seed=seed)
+    train_loader, val_loader, test_loader = get_dataloader(config.dataset, seed=seed)
 
     joblib.dump(train_loader, config.dataset.train_loader_path)
     joblib.dump(val_loader, config.dataset.val_loader_path)
+    joblib.dump(test_loader, config.dataset.test_loader_path)
