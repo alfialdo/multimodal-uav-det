@@ -9,11 +9,12 @@ import dvc.api as dvc
 from dataset import create_dataloader
 from utils.datatype import Config
 
-def get_dataloader(config, test=False):
+def get_dataloader(config, test=False, seed=11):
 
     common_args = dict(
         remote=config.remote,
         img_size=config.image_size,
+        seed=seed
     )
 
     train_tsfm = A.Compose([
@@ -63,11 +64,12 @@ def get_dataloader(config, test=False):
 
 if __name__ == "__main__":
     config = Config(dvc.params_show())
+    seed = config.train.seed
     
-    if config.train.seed:
-        seed_everything(config.train.seed, workers=True)
+    if seed:
+        seed_everything(seed, workers=True)
     
-    train_loader, val_loader = get_dataloader(config.dataset)
+    train_loader, val_loader = get_dataloader(config.dataset, seed=seed)
 
     joblib.dump(train_loader, config.dataset.train_loader_path)
     joblib.dump(val_loader, config.dataset.val_loader_path)
