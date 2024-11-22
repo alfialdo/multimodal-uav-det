@@ -27,11 +27,11 @@ class ObjectnessHead(pl.LightningModule):
         super().__init__()
         predict_c = n_anchors * 1
         self.n_anchors = n_anchors
-        self.conv_bbox = nn.Conv2d(in_channels, predict_c, kernel_size=(1,1), stride=(1,1))
+        self.conv_obj = nn.Conv2d(in_channels, predict_c, kernel_size=(1,1), stride=(1,1))
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
-        x = self.conv_bbox(x)
+        x = self.conv_obj(x)
 
         x = einops.rearrange(
             x, 'b (n_anchors obj) h w -> b n_anchors h w obj', 
@@ -48,11 +48,11 @@ class BBoxHead(pl.LightningModule):
         super().__init__()
         predict_c = n_anchors * 4
         self.n_anchors = n_anchors
-        self.conv_obj = nn.Conv2d(in_channels, predict_c, kernel_size=(1,1), stride=(1,1))
+        self.conv_bbox = nn.Conv2d(in_channels, predict_c, kernel_size=(1,1), stride=(1,1))
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
-        x = self.conv_obj(x)
+        x = self.conv_bbox(x)
         x = einops.rearrange(
             x, 'b (n_anchors bbox) h w -> b n_anchors h w bbox', 
             n_anchors=self.n_anchors, bbox=4
@@ -66,7 +66,6 @@ class YOLOHead(pl.LightningModule)  :
     def __init__(self, x_channels:List[int], input_size, anchors, loss_balancing):
         super().__init__()
         # x_channels --> [x0_scale, x1_scale, x2_scale]
-        self.input_scale = input_size[-1]
         self.anchors = torch.tensor(anchors)
         self.detection_head = nn.ModuleList()
         n_anchors = len(anchors[0])
@@ -85,13 +84,13 @@ class YOLOHead(pl.LightningModule)  :
         outs = []
 
         for head_idx, (f_map, det_head) in enumerate(zip(f_maps, self.detection_head)):
-            scale = einops.parse_shape(f_map, 'b n_anchors h w')
+            out_scale = einops.parse_shape(f_map, 'b n_anchors h w')
             obj = det_head['obj'](f_map)
             bbox = det_head['bbox'](f_map)
 
             # Calculate bbox coordinates relative to grid
             bbox = self.__scale_bbox_size(
-                scale['b'], scale['h'], scale['w'], 
+                out_scale['b'], out_scale['h'], out_scale['w'], 
                 bbox, self.anchors[head_idx]
             )
 
@@ -102,11 +101,14 @@ class YOLOHead(pl.LightningModule)  :
     def compute_metrics(self, outs:List[DetectionResults], batch:BatchData, head_scales:List[int], return_ap=False):
         device = outs[0].bbox.device
         batch_size = len(batch.bbox)
-        total_loss = torch.tensor(0.0).to(device)
+        bbox_losses = torch.tensor(0.0).to(device)
+        obj_losses = torch.tensor(0.0).to(device)
         total_ap = torch.tensor(0.0).to(device)
 
         # Loop through each batch
         for i in range(batch_size):
+            batch_ap = torch.tensor(0.0).to(device)
+
             # Loop through each detection head
             for head_idx in range(len(outs)):
                 pred_bboxes = outs[head_idx].bbox[i] # head x, batch y
@@ -121,25 +123,32 @@ class YOLOHead(pl.LightningModule)  :
                 filtered_p_bbox, filtered_p_obj, t_obj = filter_high_iou_bboxes(p_bbox, p_obj, t_bbox)
 
                 # Calculate loss
-                total_loss += ((self.bbox_w * bbox_loss(filtered_p_bbox, t_bbox)) + (self.objectness_w * objectness_loss(p_obj, t_obj, self.obj_scales_w[head_idx])))
-                
-                if return_ap:
-                    map = calculate_ap(filtered_p_bbox, filtered_p_obj, t_bbox)['map']
-                    total_ap += (map / len(outs))
+                bbox_losses += self.bbox_w * bbox_loss(filtered_p_bbox, t_bbox)
+                obj_losses += self.objectness_w * objectness_loss(p_obj, t_obj, self.obj_scales_w[head_idx])
 
-        return total_loss / batch_size, total_ap / batch_size
-    
+                # Calculate prediction average precision 
+                if return_ap:
+                    ap = calculate_ap(filtered_p_bbox, filtered_p_obj, t_bbox)['map']
+                    batch_ap += (ap / len(outs))
+
+            total_ap += batch_ap
+
+        bbox_losses = bbox_losses / batch_size    
+        obj_losses = obj_losses / batch_size
+        total_loss = bbox_losses + obj_losses
+        total_ap = total_ap / batch_size if return_ap else None
+
+        return total_loss, total_ap, bbox_losses, obj_losses
+
     def __scale_targets(self, targets, scale_factor, device):
-        # targets = box_convert(targets, in_fmt='xyxy', out_fmt='cxcywh')
         scaled_targets = targets / scale_factor
         return scaled_targets.to(device)
     
     def __prepare_preds(self, pred_bboxes, pred_objs):
         p_bbox = einops.rearrange(pred_bboxes, 'n_anchors h w bbox -> (n_anchors h w) bbox')
-        p_obj = einops.rearrange(pred_objs, 'n_anchors h w obj -> (n_anchors h w) obj')
+        p_obj = einops.rearrange(pred_objs, 'n_anchors h w obj -> (n_anchors h w obj)')
 
         p_bbox = box_convert(p_bbox, in_fmt='cxcywh', out_fmt='xyxy')
-        p_obj = p_obj.squeeze()
 
         return p_bbox, p_obj
 
@@ -154,10 +163,10 @@ class YOLOHead(pl.LightningModule)  :
         anchor_h = einops.rearrange(anchors[:, 1], 'size -> 1 size 1 1').to(device)
 
         # Calculate bbox coordinates relative to grid
-        px = (bbox[..., 0] * 2 - 0.5 + grid_x)
-        py = (bbox[..., 1] * 2 - 0.5 + grid_y)
-        pw = (bbox[..., 2] * 2) ** 2 * anchor_w
-        ph = (bbox[..., 3] * 2) ** 2 * anchor_h
+        px = (bbox[..., 0] * 2 - 0.5) + grid_x
+        py = (bbox[..., 1] * 2 - 0.5) + grid_y
+        pw = ((bbox[..., 2] * 2) ** 2) * anchor_w
+        ph = ((bbox[..., 3] * 2) ** 2) * anchor_h
         bbox = torch.stack([px, py, pw, ph], dim=-1)
         
         return bbox

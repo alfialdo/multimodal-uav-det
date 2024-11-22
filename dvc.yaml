@@ -29,13 +29,41 @@ metrics:
 
 
 plots:
-- Train Loss:
+# Plot for training metrics
+- Training Loss:
     x:
       dvclive/plots/metrics/train/loss.tsv: step
     y:
       dvclive/plots/metrics/train/loss.tsv: loss
+- Training Bbox Loss:
+    x:
+      dvclive/plots/metrics/train/bbox_loss.tsv: step
+    y:
+      dvclive/plots/metrics/train/bbox_loss.tsv: bbox_loss 
+- Training Obj Loss:
+    x:
+      dvclive/plots/metrics/train/obj_loss.tsv: step
+    y:
+      dvclive/plots/metrics/train/obj_loss.tsv: obj_loss
+
+# Plot for validation metrics
 - Validation Loss:
     x:
       dvclive/plots/metrics/val/loss.tsv: step
     y:
       dvclive/plots/metrics/val/loss.tsv: loss
+- Validation Bbox Loss:
+    x:
+      dvclive/plots/metrics/val/bbox_loss.tsv: step
+    y:
+      dvclive/plots/metrics/val/bbox_loss.tsv: bbox_loss
+- Validation Obj Loss:
+    x:
+      dvclive/plots/metrics/val/obj_loss.tsv: step
+    y:
+      dvclive/plots/metrics/val/obj_loss.tsv: obj_loss
+- Validation AP:
+    x:
+      dvclive/plots/metrics/val/AP.tsv: step
+    y:
+      dvclive/plots/metrics/val/AP.tsv: AP # percentage?

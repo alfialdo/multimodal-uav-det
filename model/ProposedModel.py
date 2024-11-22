@@ -36,7 +36,7 @@ class InputStemLayer(pl.LightningModule):
 
 
 ### BACKBONE ###
-# Create SOE Module - Small-object Enchanement Module
+# SOEM Module - Small-object Enchanement Module
 class DynamicSOEM(pl.LightningModule):
     def __init__(self, in_channels, num_dy_conv=3, dy_kernel_size=3, downsample_factor=2, reduction_ratio=2): 
         super().__init__()
@@ -166,16 +166,21 @@ class ProposedModel(BaseModel):
 
     def training_step(self, batch:BatchData, batch_idx):
         outs = self.forward(batch.image, attn_temp=self.attn_temperature)
-        loss, _ = self.yolo_head.compute_metrics(outs, batch, self.head_scales)
+        loss, _, bbox_loss, obj_loss = self.yolo_head.compute_metrics(outs, batch, self.head_scales)
+
         self.log('train_loss', loss, prog_bar=True, batch_size=len(batch))
+        self.log('train_bbox_loss', bbox_loss, prog_bar=True, batch_size=len(batch))
+        self.log('train_obj_loss', obj_loss, prog_bar=True, batch_size=len(batch))
 
         return loss
 
-    # TODO: add correct AP and AR metrics calculation here
     def validation_step(self, batch:BatchData, batch_idx):
         outs = self.forward(batch.image)
-        loss, _ = self.yolo_head.compute_metrics(outs, batch, self.head_scales)
+        loss, ap, bbox_loss, obj_loss = self.yolo_head.compute_metrics(outs, batch, self.head_scales, return_ap=True)
+
         self.log('val_loss', loss, on_epoch=True, prog_bar=True, batch_size=len(batch))
-        # self.log('val_AP', ap, on_epoch=True, prog_bar=True, batch_size=len(batch))
+        self.log('val_bbox_loss', bbox_loss, on_epoch=True, prog_bar=True, batch_size=len(batch))
+        self.log('val_obj_loss', obj_loss, on_epoch=True, prog_bar=True, batch_size=len(batch))
+        self.log('val_AP', ap, on_epoch=True, prog_bar=True, batch_size=len(batch))
 
         return loss
