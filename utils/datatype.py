@@ -1,4 +1,4 @@
-from typing import NamedTuple
+from typing import NamedTuple, Union, List
 import torch
 
 class DetectionResults(NamedTuple):
@@ -7,7 +7,7 @@ class DetectionResults(NamedTuple):
 
 class BatchData(NamedTuple):
     image: torch.Tensor
-    bbox: torch.Tensor
+    bbox: Union[torch.Tensor, List[torch.Tensor]]
     # obj: torch.Tensor
 
 class Config:

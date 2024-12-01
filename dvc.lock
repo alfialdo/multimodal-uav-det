@@ -5,52 +5,58 @@ stages:
     deps:
     - path: prepare_dataloader.py
       hash: md5
-      md5: d7a8a6b6438f3af55f84fdc7d37aa0d8
-      size: 2184
+      md5: 796ac63951ee4ed4108bd34182e1e53f
+      size: 2218
     params:
       params.yaml:
         dataset:
           root_dir: /home/aldo/opt/dataset/Anti-UAV-RGBT
           train_loader_path: data/train_dataloader.pickle
           val_loader_path: data/val_dataloader.pickle
-          train_batch_size: 4
-          val_batch_size: 8
+          test_loader_path: data/test_dataloader.pickle
+          batch_size: 4
           remote: false
           image_size:
           - 640
           - 640
           workers: 16
           mosaic: false
+          format: yolo
     outs:
+    - path: data/test_dataloader.pickle
+      hash: md5
+      md5: 5485ab0408ac032bedf31e09df75ea9c
+      size: 80044830
     - path: data/train_dataloader.pickle
       hash: md5
-      md5: 505162cd5e05cfbaa6179b3b76d11ceb
-      size: 139796606
+      md5: d7983b609b7634a4cfb5518b7b9a1f68
+      size: 142397853
     - path: data/val_dataloader.pickle
       hash: md5
-      md5: 911959a4fce0d2802d7f99b7e8893307
-      size: 56770429
+      md5: 2ced7a33a5a04f0eea86bb5b9c675daa
+      size: 57840912
   train:
     cmd: python train.py
     deps:
     - path: data/train_dataloader.pickle
       hash: md5
-      md5: 505162cd5e05cfbaa6179b3b76d11ceb
-      size: 139796606
+      md5: bdfdec477a033356e8c923184cb23336
+      size: 142396985
     - path: data/val_dataloader.pickle
       hash: md5
-      md5: 911959a4fce0d2802d7f99b7e8893307
-      size: 56770429
+      md5: 34947d3c82b0c59dc03afa64fc68af3e
+      size: 57840076
     - path: train.py
       hash: md5
-      md5: 55ccda007d9a910f6a418b07f4ae966a
-      size: 2197
+      md5: 0846dab572801a30cc5bf0d5d159020d
+      size: 2194
     params:
       params.yaml:
         dataset:
           root_dir: /home/aldo/opt/dataset/Anti-UAV-RGBT
           train_loader_path: data/train_dataloader.pickle
           val_loader_path: data/val_dataloader.pickle
+          test_loader_path: data/test_dataloader.pickle
           train_batch_size: 4
           val_batch_size: 8
           remote: false
@@ -91,7 +97,7 @@ stages:
             attention_temperature: 30
             optim:
               name: SGD
-              momentum: 0.1
+              momentum: 0.7
             num_dy_conv:
             - 3
             - 3
@@ -108,16 +114,16 @@ stages:
               bbox_w: 4.0
               objectness_w: 1.0
           trainer:
-            epochs: 2
+            epochs: 10
             input_size:
             - 3
             - 640
             - 640
             profiler:
-            grad_batches: 1
+            grad_batches: 2
             train_batches: 1.0
-            val_batches: 0.3
-            val_check_interval: 4000
+            val_batches: 1.0
+            val_check_interval: 1.0
             accelerator: gpu
             devices: 1
             precision: high
@@ -128,11 +134,11 @@ stages:
     outs:
     - path: dvclive/plots
       hash: md5
-      md5: 5a50cfea8a671a899e42a4c63e288a2b.dir
-      size: 97697
-      nfiles: 3
+      md5: 1e5b68d3e5ca9dd6816dfa4a416f2cf5.dir
+      size: 632282
+      nfiles: 8
     - path: logs/checkpoints
       hash: md5
-      md5: fe59cf1c8eb1bd4d31f0716e97eb9b63.dir
+      md5: 44fff1b34efcee666b19569252dea021.dir
       size: 89655172
       nfiles: 2

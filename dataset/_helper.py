@@ -110,7 +110,7 @@ def connect_sftp():
     return sftp_client
 
 
-def custom_collate_fn(batch):
+def _custom_collate_fn(batch):
     images = []
     bboxes = []
 
@@ -128,7 +128,25 @@ def custom_collate_fn(batch):
     return BatchData(image=images, bbox=bboxes)
 
 
-def create_dataloader(dir_path, batch_size, shuffle=False, tsfm=None, remote=None, workers=4, mosaic=False, img_size=(640, 640), seed=11):
+def _yolo_collate_fn(batch):
+    images = []
+    bboxes = []
+
+    for item in batch:
+        if len(item['bbox']) == 0:  # Check if bbox is not empty
+            continue
+        
+        images.append(item['image'])
+        bboxes.append(item['bbox'])
+
+    # Convert lists to tensors
+    images = torch.stack(images)
+    bboxes = bboxes
+
+    return BatchData(image=images, bbox=bboxes)
+
+
+def create_dataloader(dir_path, dataset_cfg, train_cfg, shuffle=False, tsfm=None, seed=11):
     """
     Create a DataLoader for the AntiUAVDataset.
 
@@ -147,9 +165,12 @@ def create_dataloader(dir_path, batch_size, shuffle=False, tsfm=None, remote=Non
         torch.utils.data.DataLoader: A DataLoader for the AntiUAVDataset.
     """
     from .AntiUAVDataset import AntiUAVDataset
-    dataset = AntiUAVDataset(root_dir=dir_path, transform=tsfm, remote=remote, mosaic=mosaic, img_size=img_size, seed=seed)
+    dataset = AntiUAVDataset(dir_path, dataset_cfg, tsfm, train_cfg.anchors, train_cfg.head_scales, seed)
 
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=workers, collate_fn=custom_collate_fn)
+    dataloader = DataLoader(
+        dataset, batch_size=dataset_cfg.batch_size, shuffle=shuffle, num_workers=dataset_cfg.workers, 
+        collate_fn= _yolo_collate_fn if dataset_cfg.format == 'yolo' else _custom_collate_fn
+    )
 
     return dataloader
 
@@ -272,6 +293,28 @@ def load_dataloader(train_path: str, val_path: str):
         Tuple containing (train_loader, val_loader)
     """
     train_loader = joblib.load(train_path)
+    print('Train dataloader loaded...')
     val_loader = joblib.load(val_path)
-    
+    print('Validation dataloader loaded...')
     return train_loader, val_loader
+
+
+def calculate_iou_wh(target_w, target_h, head_anchor_wh):
+    anchor_w, anchor_h = head_anchor_wh[..., 0], head_anchor_wh[..., 1]
+
+    # Calculate box area
+    anchor_area = anchor_w * anchor_h
+    target_area = target_w * target_h
+
+    # Calculate box intersection
+    w_min = torch.min(anchor_w, target_w)
+    h_min = torch.min(anchor_h, target_h)
+    inter_area = w_min * h_min
+
+    # Calculate box union
+    union_area = anchor_area + target_area - inter_area
+
+    # Calculate IoU
+    iou = inter_area / union_area         
+
+    return iou

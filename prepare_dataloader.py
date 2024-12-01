@@ -9,24 +9,24 @@ import dvc.api as dvc
 from dataset import create_dataloader
 from utils.datatype import Config
 
-def get_dataloader(config, seed=11):
-
+def get_dataloader(dataset_cfg, train_cfg, seed):
+    img_w, img_h = dataset_cfg.image_size[0], dataset_cfg.image_size[1]
     common_args = dict(
-        remote=config.remote,
-        img_size=config.image_size,
+        dataset_cfg=dataset_cfg,
+        train_cfg=train_cfg,
         seed=seed
     )
 
     # Create transform functions
     train_tsfm = A.Compose([
-        A.Resize(common_args['img_size'][0], common_args['img_size'][1]),
+        A.Resize(img_w, img_h),
         A.Affine(scale=(0.8, 1.2), translate_percent=(-0.1, 0.1), rotate=(-30, 30), shear=(-15, 15)),
         A.ToFloat(max_value=255.0), 
         ToTensorV2(),
     ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['labels']))
 
     val_tsfm = A.Compose([
-        A.Resize(common_args['img_size'][0], common_args['img_size'][1]),
+        A.Resize(img_w,img_h),
         A.ToFloat(max_value=255.0), 
         ToTensorV2(),
     ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['labels']))
@@ -34,27 +34,25 @@ def get_dataloader(config, seed=11):
 
     # Create the data loaders
     train_loader = create_dataloader(
-        dir_path=os.path.join(config.root_dir, "train"),
-        tsfm=train_tsfm,
-        mosaic=config.mosaic,
-        batch_size=config.train_batch_size,
+        dir_path=os.path.join(dataset_cfg.root_dir, "train"),
         shuffle=True,
+        tsfm=train_tsfm,
         **common_args
     )
     print('Created train data loader..')
     
     val_loader = create_dataloader(
-        dir_path=os.path.join(config.root_dir, "val"),
+        dir_path=os.path.join(dataset_cfg.root_dir, "val"),
+        shuffle=False,
         tsfm=val_tsfm,
-        batch_size=config.val_batch_size,
         **common_args
     )
     print('Created validation data loader..')
 
     test_loader = create_dataloader(
-        dir_path=os.path.join(config.root_dir, "test"), 
+        dir_path=os.path.join(dataset_cfg.root_dir, "test"),
+        shuffle=False,
         tsfm=val_tsfm,
-        batch_size=config.val_batch_size,
         **common_args
     )
     print('Created test data loader..')
@@ -68,7 +66,11 @@ if __name__ == "__main__":
     if seed:
         seed_everything(seed, workers=True)
     
-    train_loader, val_loader, test_loader = get_dataloader(config.dataset, seed=seed)
+    train_loader, val_loader, test_loader = get_dataloader(
+        config.dataset,
+        config.train.hparams,
+        seed
+    )
 
     joblib.dump(train_loader, config.dataset.train_loader_path)
     joblib.dump(val_loader, config.dataset.val_loader_path)
