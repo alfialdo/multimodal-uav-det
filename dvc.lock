@@ -22,34 +22,58 @@ stages:
           workers: 16
           mosaic: false
           format: yolo
+        train.hparams.anchors:
+        - - - 29
+            - 23
+          - - 48
+            - 30
+          - - 67
+            - 38
+        - - - 91
+            - 54
+          - - 120
+            - 75
+          - - 157
+            - 60
+        - - - 199
+            - 73
+          - - 315
+            - 92
+          - - 268
+            - 182
+        train.hparams.head_scales:
+        - 32
+        - 16
+        - 8
+        train.seed: 211
     outs:
     - path: data/test_dataloader.pickle
       hash: md5
-      md5: 5485ab0408ac032bedf31e09df75ea9c
-      size: 80044830
+      md5: c87069900679957f949c58b929ce5b74
+      size: 80043876
     - path: data/train_dataloader.pickle
       hash: md5
-      md5: d7983b609b7634a4cfb5518b7b9a1f68
-      size: 142397853
+      md5: 4708f34bd01ef79f0a8ecf2882571b45
+      size: 142378430
     - path: data/val_dataloader.pickle
       hash: md5
-      md5: 2ced7a33a5a04f0eea86bb5b9c675daa
+      md5: cb8cc6fc3f00b06913c2786bb571114c
       size: 57840912
   train:
     cmd: python train.py
     deps:
     - path: data/train_dataloader.pickle
       hash: md5
-      md5: bdfdec477a033356e8c923184cb23336
-      size: 142396985
+      md5: 4708f34bd01ef79f0a8ecf2882571b45
+      size: 142378430
     - path: data/val_dataloader.pickle
       hash: md5
-      md5: 34947d3c82b0c59dc03afa64fc68af3e
-      size: 57840076
+      md5: cb8cc6fc3f00b06913c2786bb571114c
+      size: 57840912
     - path: train.py
       hash: md5
-      md5: 0846dab572801a30cc5bf0d5d159020d
-      size: 2194
+      md5: 3f1313d84def58a38d28d887d82acc56
+      size: 2237
     params:
       params.yaml:
         dataset:
@@ -57,17 +81,17 @@ stages:
           train_loader_path: data/train_dataloader.pickle
           val_loader_path: data/val_dataloader.pickle
           test_loader_path: data/test_dataloader.pickle
-          train_batch_size: 4
-          val_batch_size: 8
+          batch_size: 4
           remote: false
           image_size:
           - 640
           - 640
           workers: 16
           mosaic: false
+          format: yolo
         train:
-          seed: 11
-          model: proposed
+          seed: 211
+          model: yolov3
           hparams:
             anchors:
             - - - 29
@@ -89,8 +113,8 @@ stages:
               - - 268
                 - 182
             head_scales:
-            - 2
-            - 4
+            - 32
+            - 16
             - 8
             lr: 0.0001
             lr_scheduler: false
@@ -113,8 +137,9 @@ stages:
               - 0.5
               bbox_w: 4.0
               objectness_w: 1.0
+              no_obj_w: 4.0
           trainer:
-            epochs: 10
+            epochs: 5
             input_size:
             - 3
             - 640
@@ -126,7 +151,8 @@ stages:
             val_check_interval: 1.0
             accelerator: gpu
             devices: 1
-            precision: high
+            precision: 16
+            grad_clip_val:
           checkpoint:
             dir: logs/checkpoints
             monitor: val_loss
@@ -134,11 +160,11 @@ stages:
     outs:
     - path: dvclive/plots
       hash: md5
-      md5: 1e5b68d3e5ca9dd6816dfa4a416f2cf5.dir
-      size: 632282
-      nfiles: 8
+      md5: 73277b851060799d2a911fb4a8708c96.dir
+      size: 301723
+      nfiles: 7
     - path: logs/checkpoints
       hash: md5
-      md5: 44fff1b34efcee666b19569252dea021.dir
-      size: 89655172
+      md5: 8c3b469ef282544ad5924e69d151da89.dir
+      size: 985171168
       nfiles: 2

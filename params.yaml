@@ -13,8 +13,8 @@ dataset:
   format: yolo
 
 train:
-  seed: 11
-  model: proposed
+  seed: 211
+  model: yolov3
   hparams:
     anchors:
     - - - 29
@@ -36,8 +36,8 @@ train:
       - - 268
         - 182
     head_scales:           # x0, x1, x2
-    - 2
-    - 4
+    - 32
+    - 16
     - 8
     lr: 0.0001
     lr_scheduler: false
@@ -58,11 +58,11 @@ train:
       - 2.0
       - 1.0
       - 0.5
-      bbox_w: 5.0
+      bbox_w: 4.0
       objectness_w: 1.0
-      no_obj_w: 5.0
+      no_obj_w: 4.0
   trainer:
-    epochs: 10
+    epochs: 5
     input_size:
     - 3
     - 640
@@ -74,7 +74,8 @@ train:
     val_check_interval: 1.0
     accelerator: gpu
     devices: 1
-    precision: high
+    precision: 16
+    grad_clip_val: null
   checkpoint:
     dir: logs/checkpoints
     monitor: val_loss

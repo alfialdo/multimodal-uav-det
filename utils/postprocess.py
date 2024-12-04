@@ -1,8 +1,6 @@
 import cv2
 import numpy as np
 
-import torch
-from torchvision.ops import box_convert
 
 def draw_bbox(image, bbox, color=(0, 255, 0), thickness=2, label=None, format='xyxy'):
     """Draw bounding box on image from xyxy format coordinates

@@ -2,13 +2,11 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 import pytorch_lightning as pl
-from torchvision.ops import box_convert
 
 from typing import List
 import einops
 
-from utils.datatype import DetectionResults, BatchData
-from utils.metrics import bbox_loss, objectness_loss, calculate_ap, filter_high_iou_bboxes
+from utils.datatype import BatchData
 from ._base import BaseModel, ConvModule, YOLOHead
 
 
@@ -30,7 +28,7 @@ class InputStemLayer(pl.LightningModule):
     def __init__(self, out_channels):
         super().__init__()
         self.conv = ConvModule(3, out_channels, kernel_size=(1,1), bias=False, activation='silu')
-        
+
     def forward(self, x):
         return self.conv(x)
 
@@ -130,7 +128,7 @@ class SimplifiedFPN(pl.LightningModule):
 
 # Propose Model Configuration
 class ProposedModel(BaseModel):
-    def __init__(self, input_size, hparams, stem_out_channels=32):
+    def __init__(self, hparams, stem_out_channels=32):
         super().__init__(hparams)
         self.attn_temperature = hparams.attention_temperature
         self.input_stem = InputStemLayer(stem_out_channels)
@@ -146,18 +144,25 @@ class ProposedModel(BaseModel):
        
         x_out_channels = [x*2 for x in x_in_scales]
         self.neck = SimplifiedFPN(x_out_channels)
-        self.yolo_head = YOLOHead(x_out_channels, input_size, hparams.anchors, hparams.loss_balancing)
+        self.yolo_head = YOLOHead(x_out_channels, hparams.anchors, hparams.loss_balancing)
 
     def forward(self, x, attn_temp=1.0):
         x = self.input_stem(x)
+        assert not torch.isnan(x).any(), "NaN after input_stem"
+        
         x_features = []
-
-        for dy_soem in self.backbone:
+        for i, dy_soem in enumerate(self.backbone):
             x = dy_soem(x, attn_temp)
+            assert not torch.isnan(x).any(), f"NaN after DySOEM {i}"
             x_features.append(x)
 
+
         x0, x1, x2 = self.neck(x_features)
+        assert not torch.isnan(x0).any(), "NaN in neck output x0"
+        assert not torch.isnan(x1).any(), "NaN in neck output x1"
+        assert not torch.isnan(x2).any(), "NaN in neck output x2"
         del x_features
+
 
         outs = self.yolo_head([x0, x1, x2])
         del x0, x1, x2 
@@ -175,12 +180,12 @@ class ProposedModel(BaseModel):
         return loss
 
     def validation_step(self, batch:BatchData, batch_idx):
-        outs = self.forward(batch.image)
-        loss, ap, bbox_loss, obj_loss = self.yolo_head.compute_metrics(outs, batch, self.head_scales, return_ap=True)
+        outs = self.forward(batch.image, attn_temp=self.attn_temperature)
+        loss, ap, bbox_loss, obj_loss = self.yolo_head.compute_metrics(outs, batch, self.head_scales, return_ap=False)
 
         self.log('val_loss', loss, on_epoch=True, prog_bar=True, batch_size=len(batch))
         self.log('val_bbox_loss', bbox_loss, on_epoch=True, prog_bar=True, batch_size=len(batch))
         self.log('val_obj_loss', obj_loss, on_epoch=True, prog_bar=True, batch_size=len(batch))
-        self.log('val_AP', ap, on_epoch=True, prog_bar=True, batch_size=len(batch))
+        # self.log('val_AP', ap, on_epoch=True, prog_bar=True, batch_size=len(batch))
 
         return loss

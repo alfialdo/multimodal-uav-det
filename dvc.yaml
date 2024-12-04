@@ -5,6 +5,9 @@ stages:
     - prepare_dataloader.py
     params:
     - dataset
+    - train.seed
+    - train.hparams.anchors
+    - train.hparams.head_scales
     outs:
     - ${dataset.train_loader_path}
     - ${dataset.val_loader_path}
@@ -62,8 +65,8 @@ plots:
       dvclive/plots/metrics/val/obj_loss.tsv: step
     y:
       dvclive/plots/metrics/val/obj_loss.tsv: obj_loss
-- Validation AP:
-    x:
-      dvclive/plots/metrics/val/AP.tsv: step
-    y:
-      dvclive/plots/metrics/val/AP.tsv: AP # percentage?
+# - Validation AP:
+#     x:
+#       dvclive/plots/metrics/val/AP.tsv: step
+#     y:
+#       dvclive/plots/metrics/val/AP.tsv: AP # percentage?

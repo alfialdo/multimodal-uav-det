@@ -7,7 +7,7 @@ from dvclive.lightning import DVCLiveLogger
 import dvc.api as dvc
 from dvclive import Live
 
-from model.ProposedModel import ProposedModel
+from model import ProposedModel, YOLOv3
 from dataset import load_dataloader
 from utils.datatype import Config
 
@@ -18,12 +18,11 @@ def train(config, train_loader, val_loader):
     model_name = config.train.model
     ckpt_cfg = config.train.checkpoint
 
-    # Set weights precision
-    torch.set_float32_matmul_precision(trainer_cfg.precision)
-
     # Initialize model & dataloader
     if model_name == "proposed":
-        model = ProposedModel(input_size=trainer_cfg.input_size, hparams=hparams)
+        model = ProposedModel(hparams=hparams)
+    elif model_name == "yolov3":
+        model = YOLOv3(hparams=hparams)
     else:
         raise ValueError(f"Model {model} not supported")
     
@@ -49,7 +48,9 @@ def train(config, train_loader, val_loader):
             limit_train_batches=trainer_cfg.train_batches,
             limit_val_batches=trainer_cfg.val_batches,
             val_check_interval=trainer_cfg.val_check_interval,
-            check_val_every_n_epoch=None
+            gradient_clip_val=trainer_cfg.grad_clip_val,
+            precision=trainer_cfg.precision,
+            check_val_every_n_epoch=1
         )
 
         trainer.fit(model, train_loader, val_loader)
