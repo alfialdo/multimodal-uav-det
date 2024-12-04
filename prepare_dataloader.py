@@ -4,10 +4,9 @@ from pytorch_lightning import seed_everything
 
 import os
 import joblib
-import dvc.api as dvc
+from omegaconf import OmegaConf
 
 from dataset import create_dataloader
-from utils.datatype import Config
 
 def get_dataloader(dataset_cfg, train_cfg, seed):
     img_w, img_h = dataset_cfg.image_size[0], dataset_cfg.image_size[1]
@@ -60,7 +59,7 @@ def get_dataloader(dataset_cfg, train_cfg, seed):
     return train_loader, val_loader, test_loader
 
 if __name__ == "__main__":
-    config = Config(dvc.params_show())
+    config = OmegaConf.load('params.yaml')
     seed = config.train.seed
     
     if seed:
@@ -68,7 +67,7 @@ if __name__ == "__main__":
     
     train_loader, val_loader, test_loader = get_dataloader(
         config.dataset,
-        config.train.hparams,
+        config.model.hparams,
         seed
     )
 

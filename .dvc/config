@@ -1,6 +1,8 @@
 [core]
     remote = remote-storage
     autostage = true
+[hydra]
+    enabled = true
 ['remote "remote-storage"']
     url = ssh://user@url:22/path
     ask_password = true

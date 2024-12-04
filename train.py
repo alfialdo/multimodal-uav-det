@@ -6,24 +6,23 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from dvclive.lightning import DVCLiveLogger
 import dvc.api as dvc
 from dvclive import Live
+from omegaconf import OmegaConf
 
-from model.ProposedModel import ProposedModel
+from model import BaselineModel, DySOEM_SimFPN
 from dataset import load_dataloader
-from utils.datatype import Config
 
 def train(config, train_loader, val_loader):
     # Load config
     trainer_cfg = config.train.trainer
-    hparams= config.train.hparams
-    model_name = config.train.model
+    hparams= config.model.hparams
+    model_name = config.model.name
     ckpt_cfg = config.train.checkpoint
 
-    # Set weights precision
-    torch.set_float32_matmul_precision(trainer_cfg.precision)
-
     # Initialize model & dataloader
-    if model_name == "proposed":
-        model = ProposedModel(input_size=trainer_cfg.input_size, hparams=hparams)
+    if model_name == "DySOEM_SimFPN":
+        model = DySOEM_SimFPN(hparams=hparams)
+    elif model_name == "baseline":
+        model = BaselineModel(hparams=hparams)
     else:
         raise ValueError(f"Model {model} not supported")
     
@@ -49,13 +48,15 @@ def train(config, train_loader, val_loader):
             limit_train_batches=trainer_cfg.train_batches,
             limit_val_batches=trainer_cfg.val_batches,
             val_check_interval=trainer_cfg.val_check_interval,
-            check_val_every_n_epoch=None
+            gradient_clip_val=trainer_cfg.grad_clip_val,
+            precision=trainer_cfg.precision,
+            check_val_every_n_epoch=1
         )
 
         trainer.fit(model, train_loader, val_loader)
 
 if __name__ == "__main__":
-    config = Config(dvc.params_show())
+    config = OmegaConf.load("params.yaml")
 
     if config.train.seed:
         seed_everything(config.train.seed, workers=True)
