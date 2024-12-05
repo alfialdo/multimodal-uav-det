@@ -8,7 +8,7 @@ import dvc.api as dvc
 from dvclive import Live
 from omegaconf import OmegaConf
 
-from model import BaselineModel, DySOEM_SimFPN
+from model import BaselineModel, DySOEM_SimFPN, DyYOLO
 from dataset import load_dataloader
 
 def train(config, train_loader, val_loader):
@@ -23,6 +23,8 @@ def train(config, train_loader, val_loader):
         model = DySOEM_SimFPN(hparams=hparams)
     elif model_name == "baseline":
         model = BaselineModel(hparams=hparams)
+    elif model_name == "DyYOLO":
+        model = DyYOLO(hparams=hparams)
     else:
         raise ValueError(f"Model {model} not supported")
     

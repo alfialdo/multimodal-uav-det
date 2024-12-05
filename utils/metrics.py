@@ -1,139 +1,134 @@
 # TODO: add metrics to calculate FPS, GFLOPS ?
 import torch
-from torchvision.ops import box_convert, complete_box_iou_loss, box_iou
+from torchvision.ops import complete_box_iou_loss, box_convert
 from torchmetrics.detection import MeanAveragePrecision
 import torch.nn.functional as F
-import einops
 
-
-def bbox_loss(preds, targets):
+def bbox_loss(preds_decoded, targets, bbox_loss_fn='mse'):
     """
-    Calculate the average bounding box loss between predicted and target boxes.
+    Calculate the complete IoU loss between predicted and target bounding boxes.
     
     Args:
-        preds (torch.Tensor): Predicted bounding boxes in format [N, 4] where N is number of predictions
-                            and 4 represents box coordinates
-        targets (torch.Tensor): Target bounding boxes in format [M, 4] where M is number of ground truth boxes
-                              and 4 represents box coordinates
+        preds_decoded (torch.Tensor): Predicted bounding boxes in format [n_anchors, h, w, 4] 
+                                    where 4 represents box coordinates in cxcywh format
+        targets (torch.Tensor): Target bounding boxes in format [N, 4] where N is number of ground truth boxes
+                              and 4 represents box coordinates in cxcywh format
+        head_size (int): Size of the feature map grid for this detection head
+        head_anchors (torch.Tensor): Anchor boxes for this detection head in format [n_anchors, 2]
+                                   where 2 represents width and height
 
     Returns:
-        torch.Tensor: Average loss value across all valid predictions and targets. Returns 0.0 if no valid
-                     predictions exist.
+        torch.Tensor: Complete IoU loss value between matched predictions and targets
+    """ 
+    if bbox_loss_fn == 'mse':
+        bbox_loss = F.mse_loss(preds_decoded, targets, reduction='mean')
 
-    Note:
-        For each target box, finds the minimum complete IoU loss with all predicted boxes.
-        The final loss is the mean of these minimum losses across all targets.
-    """
-    losses = []
-
-    for t_bbox in targets:
-        if len(preds) != 0:
-            loss = complete_box_iou_loss(preds, t_bbox).min()
-            losses.append(loss)
-        else:
-            continue
-    
-    if len(losses) == 0:
-        avg_loss = torch.tensor(0.0)
-    else:
-        avg_loss = torch.tensor(losses).mean()
-
-    return avg_loss
+    elif bbox_loss_fn == 'ciou':
+        # Convert format cxcywh to xyxy
+        preds_decoded = box_convert(preds_decoded, in_fmt='cxcywh', out_fmt='xyxy')
+        targets = box_convert(targets, in_fmt='cxcywh', out_fmt='xyxy')    
 
 
-def objectness_loss(preds, targets, obj_scale_w, reduction='mean'):
+        # Calculate complete IoU loss between pred-target pairs, reduction use to get scalar value
+        bbox_loss = complete_box_iou_loss(preds_decoded, targets, reduction='mean')
+
+    return bbox_loss
+
+
+def objectness_loss(preds_obj, targets, obj_scale_w, reduction='mean'):
     """
     Calculate binary cross entropy loss between predicted objectness scores and target values.
     
     Args:
-        preds (torch.Tensor): Predicted objectness scores in range [0,1]
-        targets (torch.Tensor): Target objectness values (0 or 1)
+        preds_obj (torch.Tensor): Predicted objectness scores in format [n_anchors, h, w, 1]
+        targets (torch.Tensor): Target objectness values in format [n_anchors, h, w, 1] 
+                              containing binary values (0 or 1)
+        obj_scale_w (float): Weight factor to scale the objectness loss
         reduction (str, optional): Specifies the reduction to apply to the output.
                                  Can be 'none', 'mean', or 'sum'. Default: 'mean'
     
     Returns:
-        torch.Tensor: Binary cross entropy loss between predictions and targets.
+        torch.Tensor: Weighted binary cross entropy loss between predictions and targets.
                      If reduction is 'none', returns loss for each element.
                      If reduction is 'mean' or 'sum', returns reduced loss value.
     """
-    # Ensure target is on same device as pred
-    avg_loss = F.binary_cross_entropy(preds, targets, reduction=reduction)
+    preds_obj = preds_obj.squeeze(dim=-1)
+    avg_loss = F.binary_cross_entropy_with_logits(preds_obj, targets, reduction=reduction)
 
-    return (avg_loss * obj_scale_w)
+    return avg_loss * obj_scale_w
 
 
-
-def calculate_ap(pred_boxes, pred_objs, target_boxes, max_det=150, iou_th=None):
+def no_obj_loss(preds_no_obj, targets, reduction='mean'):
     """
-    Calculate Mean Average Precision (mAP) for RTMUAVDet predictions.
+    Calculate binary cross entropy loss between predicted objectness scores and target values
+    for grid cells that don't contain objects.
     
     Args:
-        predictions (List[DetectionResults]): List of detection results from different scales
-            Each DetectionResults contains:
-            - bbox: tensor of shape [B, A, H, W, 4] in (cx, cy, w, h) format
-            - obj: tensor of shape [B, A, H, W, 1] containing objectness scores
-            
-        targets (BatchData): Batch of ground truth data containing:
-            - bbox: List of tensors, each of shape [M, 4] in (x1, y1, x2, y2) format
+        preds_obj (torch.Tensor): Predicted objectness scores in format [n_anchors, h, w, 1]
+                                 for grid cells without objects
+        targets (torch.Tensor): Target objectness values in format [n_anchors, h, w, 1]
+                              containing binary values (0 or 1) for grid cells without objects
+        reduction (str, optional): Specifies the reduction to apply to the output.
+                                 Can be 'none', 'mean', or 'sum'. Default: 'mean'
+    
+    Returns:
+        torch.Tensor: Binary cross entropy loss between predictions and targets for no-object cells.
+                     If reduction is 'none', returns loss for each element.
+                     If reduction is 'mean' or 'sum', returns reduced loss value.
+    """
+    preds_no_obj = preds_no_obj.squeeze(dim=-1)
+    avg_loss = F.binary_cross_entropy_with_logits(preds_no_obj, targets, reduction=reduction)
+
+    return avg_loss
+
+
+
+def calculate_ap(pred_boxes, pred_obj, target_boxes, max_det=300, iou_th=None):
+    """
+    Calculate Mean Average Precision (mAP) for object detection predictions.
+    
+    Args:
+        preds (List[dict]): List of predicted bounding boxes in format [N, 4] where N is number of predictions
+                                 and 4 represents box coordinates in cxcywh format
+        target_boxes (torch.Tensor): Target bounding boxes in format [M, 4] where M is number of ground truth boxes
+                                   and 4 represents box coordinates in cxcywh format
+        max_det (int, optional): Maximum number of detections to consider. Default: 300
+        iou_th (List[float], optional): List of IoU thresholds to evaluate AP. 
+                                      If None, uses thresholds from 0.5 to 0.95 with step 0.05.
+                                      Default: None
             
     Returns:
-        dict: Dictionary containing various AP metrics including 'map' (AP@[0.5:0.95])
+        dict: Dictionary containing AP metrics including:
+            - map: Mean AP across IoU thresholds [0.5:0.95]
+            - map_50: AP at IoU threshold 0.5
+            - map_75: AP at IoU threshold 0.75
+            - map_small: AP for small objects
+            - map_medium: AP for medium objects  
+            - map_large: AP for large objects
     """
     if iou_th is None:
         iou_th = [0.5 + 0.05 * i for i in range(10)]
 
     metric_ap = MeanAveragePrecision(
-        box_format='xyxy',
+        box_format='cxcywh',
         iou_thresholds=iou_th,
-        max_detection_thresholds=[max_det]*3,
+        max_detection_thresholds=[max_det]*3
     )
 
-    pred_dict = [dict( 
+    device = target_boxes.device
+
+    pred_dict = [dict(
         boxes= pred_boxes,
-        scores= pred_objs,
-        labels= torch.ones(len(pred_boxes), dtype=torch.int64, device=pred_boxes.device)
+        scores= pred_obj,
+        labels= torch.ones(len(pred_boxes), dtype=torch.int64, device=device)
     )]
     
     target_dict = [dict(
         boxes= target_boxes,
-        labels= torch.ones(len(target_boxes), dtype=torch.int64, device=target_boxes.device)
+        labels= torch.ones(len(target_boxes), dtype=torch.int64, device=device)
     )]
     
     # Update and compute metrics
     metric_ap.update(pred_dict, target_dict)
 
     return metric_ap.compute()
-
-def filter_high_iou_bboxes(pred_bboxes, pred_objs, target_bboxes, iou_th=0.5):
-    """
-    Filter predicted bounding boxes based on IoU with target boxes.
-    
-    Args:
-        pred_bboxes (torch.Tensor): Predicted bounding boxes in xyxy format, shape [N, 4]
-        pred_objs (torch.Tensor): Predicted objectness scores, shape [N]
-        target_bboxes (torch.Tensor): Target bounding boxes in xyxy format, shape [M, 4]
-        iou_th (float, optional): IoU threshold for filtering. Defaults to 0.5.
-        
-    Returns:
-        tuple:
-            - filtered_boxes (torch.Tensor): Filtered predicted boxes with IoU > threshold
-            - filtered_objs (torch.Tensor): Filtered objectness scores for remaining boxes
-            - true_objectness (torch.Tensor): Binary mask same shape as pred_objs, 1.0 for 
-              predictions with IoU > threshold, 0.0 otherwise
-    """
-    device = pred_bboxes.device
-    ious = box_iou(pred_bboxes, target_bboxes) 
-    
-    # Get maximum IoU for each prediction
-    max_ious, _ = torch.max(ious, dim=1)  # (1D)
-
-    # Filter IoU than less than threshold (0.5)
-    filter_iou = max_ious > iou_th
-    filtered_boxes = pred_bboxes[filter_iou, :]
-    filtered_objs = pred_objs[filter_iou]
-    
-    # Create objectness matrix (0 or 1) with original shape
-    true_objectness = torch.zeros_like(pred_objs).to(device)
-    true_objectness[filter_iou] = 1.0
-    
-    return filtered_boxes, filtered_objs, true_objectness

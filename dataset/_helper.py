@@ -133,12 +133,18 @@ def _yolo_collate_fn(batch):
     bboxes = []
 
     for item in batch:
+        assert isinstance(item['image'], torch.Tensor), f"Expected image to be tensor, got {type(item['image'])}"
+        assert isinstance(item['bbox'], list), f"Expected bbox to be list, got {type(item['bbox'])}"
+
         if len(item['bbox']) == 0:  # Check if bbox is not empty
             continue
         
+        assert not torch.isnan(item['image']).any(), "NaN in image"
         images.append(item['image'])
         bboxes.append(item['bbox'])
 
+    assert len(images) > 0, "No valid samples found in batch"
+    
     # Convert lists to tensors
     images = torch.stack(images)
     bboxes = bboxes
@@ -299,8 +305,8 @@ def load_dataloader(train_path: str, val_path: str):
     return train_loader, val_loader
 
 
-def calculate_iou_wh(target_w, target_h, head_anchor_wh):
-    anchor_w, anchor_h = head_anchor_wh[..., 0], head_anchor_wh[..., 1]
+def calculate_anchor_iou(target_w, target_h, head_anchors):
+    anchor_w, anchor_h = head_anchors[..., 0], head_anchors[..., 1]
 
     # Calculate box area
     anchor_area = anchor_w * anchor_h
@@ -315,6 +321,10 @@ def calculate_iou_wh(target_w, target_h, head_anchor_wh):
     union_area = anchor_area + target_area - inter_area
 
     # Calculate IoU
-    iou = inter_area / union_area         
+    iou = inter_area / union_area
 
-    return iou
+    # Get indices sorted by IoU (highest to lowest)
+    sorted_anchor_idx = torch.argsort(iou, descending=True)
+    sorted_iou = iou[sorted_anchor_idx]
+
+    return sorted_anchor_idx, sorted_iou

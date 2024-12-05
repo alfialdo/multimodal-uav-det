@@ -2,8 +2,9 @@ import pytorch_lightning as pl
 from torch import nn
 import torch
 
-from ._base import BaseModel, YOLOHead
+from ._base import BaseModel, YOLOHead, DyConvModule
 from dataset._helper import BatchData
+from fightingcv_attention.conv.DynamicConv import *
 
 ### BACKBONE ###
 
@@ -19,8 +20,7 @@ class CNNBlock(pl.LightningModule):
         if self.use_bn_act:
             return self.leaky(self.bn(self.conv(x)))
         else:
-            return self.conv(x)
-        
+            return self.conv(x)  
 
 class ResidualBlock(nn.Module):
     def __init__(self, channels, use_residual=True, num_repeats=1):
@@ -52,11 +52,12 @@ class ScalePrediction(nn.Module):
     def forward(self, x):
         return self.conv(x)
 
-# BaselineModel Model configuration
-class BaselineModel(BaseModel):
+# DyYOLO Model configuration
+class DyYOLO(BaseModel):
     def __init__(self, hparams):
         super().__init__(hparams)
         self.layers = nn.ModuleList()
+        self.attn_temp = hparams.attn_temperature
         x_out_channels = []
         in_channels = 3
 
@@ -90,7 +91,7 @@ class BaselineModel(BaseModel):
             else:
                 out_channels, kernel_size, stride = module
                 self.layers.append(
-                    CNNBlock(
+                    DyConvModule(
                         in_channels,
                         out_channels,
                         kernel_size=kernel_size,
@@ -110,8 +111,11 @@ class BaselineModel(BaseModel):
             if isinstance(layer, ScalePrediction):
                 outs.append(layer(x))
                 continue
-
-            x = layer(x)
+            
+            if isinstance(layer, DyConvModule):
+                x = layer(x, self.attn_temp)
+            else:
+                x = layer(x)
 
             if isinstance(layer, ResidualBlock) and layer.num_repeats == 8:
                 route_connections.append(x)

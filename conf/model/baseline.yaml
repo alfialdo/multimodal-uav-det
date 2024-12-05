@@ -9,7 +9,7 @@ hparams:
   lr: 0.0001
   lr_scheduler: false
   loss_balancing:
-    obj_scales_w: [2.0, 1.0, 0.5]
+    obj_scales_w: [0.5, 1.0, 2.0]
     bbox_w: 4.0
     objectness_w: 1.0
     no_obj_w: 4.0

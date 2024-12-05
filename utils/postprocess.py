@@ -1,8 +1,9 @@
 import cv2
 import numpy as np
-
 import torch
-from torchvision.ops import box_convert
+import einops
+
+from torchvision.ops import box_iou, box_convert
 
 def draw_bbox(image, bbox, color=(0, 255, 0), thickness=2, label=None, format='xyxy'):
     """Draw bounding box on image from xyxy format coordinates
@@ -42,6 +43,40 @@ def draw_bbox(image, bbox, color=(0, 255, 0), thickness=2, label=None, format='x
         cv2.putText(image, label, (x1, y1-baseline-3), font, font_scale, (255,255,255), 1)
         
     return image
+
+
+def calculate_iou(preds, targets, anchors, mask=None):
+    """Calculate IoU between predicted and target bounding boxes in grid cell format
+    
+    Args:
+        preds (torch.Tensor): Predicted bounding boxes [N,4] in format (offset_x, offset_y, grid_cell_w, grid_cell_h)
+        targets (torch.Tensor): Target bounding boxes [N,4] in format (offset_x, offset_y, grid_cell_w, grid_cell_h) 
+        anchors (torch.Tensor): Anchor boxes [3,2] in format (w,h)
+        mask (torch.Tensor): Mask for valid grid cells [N]
+    Returns:
+        torch.Tensor: IoU scores between predictions and targets [N]
+    """
+    # Scale preds width and height to grid cell size
+    # Reshape anchors to match prediction shape for broadcasting
+    device = preds.device
+    anchors = einops.repeat(anchors, 'n_anchors wh -> n_anchors 1 1 wh').to(device)
+    preds[..., 2:] *= anchors
+
+    # Convert bbox format from cxcywh to xyxy
+    if mask is not None:
+        preds = preds[mask]
+        targets = targets[mask]
+    else:
+        preds = einops.rearrange(preds, 'n_anchors h w bbox -> (n_anchors h w) bbox')
+        targets = einops.rearrange(targets, 'n_anchors h w bbox -> (n_anchors h w) bbox')
+
+    preds = box_convert(preds, in_fmt='cxcywh', out_fmt='xyxy')
+    targets = box_convert(targets, in_fmt='cxcywh', out_fmt='xyxy')
+
+    # Calculate IoU
+    ious = box_iou(preds, targets)
+
+    return ious[:,0]
 
 
 

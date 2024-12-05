@@ -1,7 +1,6 @@
 import torch
 from torch.utils.data import Dataset
 from torchvision.ops import box_convert
-from albumentations.pytorch import ToTensorV2
 
 from PIL import Image
 import pandas as pd
@@ -9,8 +8,8 @@ import numpy as np
 import os
 import io
 
-from ._helper import load_json, load_attributes, connect_sftp, create_mosaic_4_img, calculate_iou_wh
-from utils.datatype import BatchData
+from ._helper import load_json, load_attributes, connect_sftp, create_mosaic_4_img, calculate_anchor_iou
+from utils.test import generate_yolo_bboxes_test
 
 class AntiUAVDataset(Dataset):
     def __init__(self, root_dir, config, transform=None, anchors=None, head_scales=None, seed=11):
@@ -127,10 +126,11 @@ class AntiUAVDataset(Dataset):
         
         return df    
 
-    def __generate_yolo_bboxes(self, bbox):
+    def __generate_yolo_bboxes(self, bbox:torch.Tensor):
         if bbox.numel() == 0:
-            print('generate yolo', bbox)
-            return bbox
+            return []
+        
+        assert bbox.dim() == 2 and bbox.size(1) == 4, f"Expected bbox shape (N,4), got {bbox.shape}"
 
         # Normalize bboxes to value [0,1] with format cxcywh
         bbox = box_convert(bbox, 'xyxy', 'cxcywh')
@@ -141,24 +141,35 @@ class AntiUAVDataset(Dataset):
         scale_bboxes = [torch.zeros(len(self.anchors[0]), s, s, 5) for s in self.head_size] # Create target in scaled space --> (n_anchors, grid_y, grid_x, [obj, cx, cy, w, h])
 
         for head_idx, size in enumerate(self.head_size):
-            grid_x, grid_y = int(cx * size), int (cy * size)
 
             # Assign grid cell cx and cy
-            grid_cx, grid_cy = (cx * size) - grid_x, (cy * size) - grid_y # value [0, 1]
+            grid_cx, grid_cy = (cx * size), (cy * size) 
+            grid_x, grid_y = int(grid_cx), int(grid_cy) # grid cell position
+            offset_cx, offset_cy = grid_cx - grid_x, grid_cy - grid_y # value [0, 1] refer to offset from grid cell point
 
             # Assign grid width and height
-            grid_w, grid_h = w * size, h * size # value could be > 1.0
-            grid_bbox = torch.tensor([grid_cx, grid_cy, grid_w, grid_h])
-            
-            for anchor_idx, anchors in enumerate(self.anchors[head_idx]):
+            grid_w, grid_h = w * size, h * size # offsets coord value could be > 1.0
+            grid_bbox = torch.tensor([offset_cx, offset_cy, grid_w, grid_h])
+            best_anchors, ious = calculate_anchor_iou(w, h, self.anchors[head_idx])
 
-                obj = 1.0 if calculate_iou_wh(w, h, anchors) >= 0.5 else 0.0
-
-                # Add objectness to grid space
-                scale_bboxes[head_idx][anchor_idx, grid_y, grid_x, 0] = obj # value 0.0 or 1.0
-
-                # Add coordinates to grid space
+            # Assign only the highest iou anchor
+            if ious[0] < 0.5:
+                anchor_idx = best_anchors[0]
+                scale_bboxes[head_idx][anchor_idx, grid_y, grid_x, 0] = torch.tensor(1.0)
                 scale_bboxes[head_idx][anchor_idx, grid_y, grid_x, 1:5] = grid_bbox
+            else:
+                for anchor_idx, iou in zip(best_anchors, ious):
+
+                    obj = torch.tensor(1.0 if iou >= 0.5 else 0.0)
+
+                    # Add objectness to grid space
+                    scale_bboxes[head_idx][anchor_idx, grid_y, grid_x, 0] = obj # value 0.0 or 1.0
+
+                    # Add coordinates to grid space
+                    scale_bboxes[head_idx][anchor_idx, grid_y, grid_x, 1:5] = grid_bbox
         
+        
+        generate_yolo_bboxes_test(scale_bboxes, self.head_size)
         return scale_bboxes
 
+8

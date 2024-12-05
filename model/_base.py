@@ -3,10 +3,11 @@ import pytorch_lightning as pl
 from torch import nn
 from typing import List
 import einops
-from torchvision.ops import box_convert
+from torchvision.ops import box_convert, nms
 
 from utils.datatype import BatchData, DetectionResults
-from utils.metrics import filter_high_iou_bboxes, bbox_loss, objectness_loss, calculate_ap
+from utils.metrics import bbox_loss, objectness_loss, no_obj_loss, calculate_ap
+from utils.postprocess import calculate_iou
 
 
 class ConvModule(pl.LightningModule):
@@ -20,6 +21,49 @@ class ConvModule(pl.LightningModule):
 
     def forward(self, x):
         return self.conv(x)
+
+class DyConvModule(pl.LightningModule):
+    def __init__(self, in_channels, out_channels, kernel_size=(3,3), stride=(1,1), padding=0, num_dy_conv=3):
+        super().__init__()
+
+        hidden_features = max(1, in_channels//4)
+
+        self.attention = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Flatten(),
+            nn.Linear(in_features=in_channels, out_features=hidden_features),
+            nn.ReLU(inplace=True),
+            nn.Linear(in_features=hidden_features, out_features=num_dy_conv)
+        )
+
+        self.dy_convs = nn.ModuleList([
+            nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=padding, stride=stride)
+            for _ in range(num_dy_conv)
+        ])
+
+        self.bn = nn.BatchNorm2d(num_features= out_channels, affine=True)
+        self.silu = nn.SiLU(inplace=True)
+        self.attn_softmax = nn.Softmax(dim=-1)
+
+    
+    def forward(self, x, attn_temp):
+        attn_weights = self.attention(x)
+        attn_weights = self.attn_softmax(attn_weights / attn_temp)
+        outs = []
+
+        for i, dy_conv in enumerate(self.dy_convs):
+            # prepare weights for broadcasting
+            w = einops.rearrange(attn_weights[:, i], 'n -> n 1 1 1')
+
+            # scoring the convolution
+            x_weighted = torch.multiply(w, dy_conv(x))
+            outs.append(x_weighted)
+        
+        outs = torch.sum(torch.stack(outs), dim=0)
+        outs = self.silu(self.bn(outs))
+
+        return outs
+
 
 
 class ObjectnessHead(pl.LightningModule):
@@ -38,7 +82,8 @@ class ObjectnessHead(pl.LightningModule):
             n_anchors=self.n_anchors, obj=1
         )
 
-        x = self.sigmoid(x)
+        # Apply sigmoid outside the model for flexibility
+        # x = self.sigmoid(x)
 
         return x
     
@@ -58,21 +103,25 @@ class BBoxHead(pl.LightningModule):
             n_anchors=self.n_anchors, bbox=4
         )
 
-        x = self.sigmoid(x)
+        # Apply sigmoid outside the model for flexibility
+        # x = self.sigmoid(x)
 
         return x
 
 class YOLOHead(pl.LightningModule)  :
-    def __init__(self, x_channels:List[int], input_size, anchors, loss_balancing):
+    def __init__(self, x_channels:List[int], anchors, loss_balancing, bbox_loss_fn='mse'):
         super().__init__()
         # x_channels --> [x0_scale, x1_scale, x2_scale]
-        self.anchors = torch.tensor(anchors)
+        self.anchors = torch.tensor(anchors).float()
         self.detection_head = nn.ModuleList()
         n_anchors = len(anchors[0])
 
         self.obj_scales_w = loss_balancing.obj_scales_w
         self.bbox_w = loss_balancing.bbox_w
         self.objectness_w = loss_balancing.objectness_w
+        self.no_obj_w = loss_balancing.no_obj_w
+        
+        self.bbox_loss_fn = bbox_loss_fn
 
         for x_in_channel in x_channels:
             self.detection_head.append(nn.ModuleDict(dict(
@@ -83,93 +132,118 @@ class YOLOHead(pl.LightningModule)  :
     def forward(self, f_maps:List[torch.Tensor]):
         outs = []
 
-        for head_idx, (f_map, det_head) in enumerate(zip(f_maps, self.detection_head)):
-            out_scale = einops.parse_shape(f_map, 'b n_anchors h w')
+        for f_map, det_head in zip(f_maps, self.detection_head):
             obj = det_head['obj'](f_map)
             bbox = det_head['bbox'](f_map)
-
-            # Calculate bbox coordinates relative to grid
-            bbox = self.__scale_bbox_size(
-                out_scale['b'], out_scale['h'], out_scale['w'], 
-                bbox, self.anchors[head_idx]
-            )
 
             outs.append(DetectionResults(obj=obj, bbox=bbox))
         
         return outs
     
-    def compute_metrics(self, outs:List[DetectionResults], batch:BatchData, head_scales:List[int], return_ap=False):
-        device = outs[0].bbox.device
-        batch_size = len(batch.bbox)
-        bbox_losses = torch.tensor(0.0).to(device)
-        obj_losses = torch.tensor(0.0).to(device)
-        total_ap = torch.tensor(0.0).to(device)
+    def compute_metrics(self, outs:List[DetectionResults], batch:BatchData, return_ap=False):
+        device = batch.image.device 
+        batch_size = len(batch.image)
+        bbox_losses = torch.tensor(0.0, device=device)
+        obj_losses = torch.tensor(0.0, device=device)
+        total_ap = torch.tensor(0.0, device=device)
 
         # Loop through each batch
         for i in range(batch_size):
-            batch_ap = torch.tensor(0.0).to(device)
+            batch_pred_bbox = []
+            batch_pred_obj = []
 
             # Loop through each detection head
             for head_idx in range(len(outs)):
-                pred_bboxes = outs[head_idx].bbox[i] # head x, batch y
-                pred_objs = outs[head_idx].obj[i]
-                target_bboxes = batch.bbox[i]
 
-                # Prepare preds and targets 
-                p_bbox, p_obj = self.__prepare_preds(pred_bboxes, pred_objs)
-                t_bbox = self.__scale_targets(target_bboxes, head_scales[head_idx], device)
+                # Get predictions and targets for current sample
+                p_bbox = outs[head_idx].bbox[i] # (n_anchors, h, w, 4)
+                p_obj = outs[head_idx].obj[i] # (n_anchors, h, w, 1)
+                assert not torch.isnan(p_bbox).any(), "p_bbox contains NaN values"
+                assert not torch.isnan(p_obj).any(), "p_obj contains NaN values"
+                
+                targets = batch.bbox[i][head_idx] # [N, (gcx, gcy, gw, gh)] based on grid cell
+                target_cell = targets[..., 0] == 1.0 # mask for grid cells with obj
+                t_bbox = targets[..., 1:] # (N, 4)
+                t_obj = targets[..., 0] # (N, 1)
 
-                # Filter high IoU bboxes
-                filtered_p_bbox, filtered_p_obj, t_obj = filter_high_iou_bboxes(p_bbox, p_obj, t_bbox)
 
-                # Calculate loss
-                bbox_losses += self.bbox_w * bbox_loss(filtered_p_bbox, t_bbox)
-                obj_losses += self.objectness_w * objectness_loss(p_obj, t_obj, self.obj_scales_w[head_idx])
+                # Decode predictions to head grid space and build target
+                p_bbox_decoded = self.__pred_bbox_decoding(p_bbox, self.anchors[head_idx], bbox_loss_fn=self.bbox_loss_fn)
+                ious = calculate_iou(p_bbox_decoded, t_bbox, self.anchors[head_idx], mask=target_cell)
+                t_bbox = self.__build_target_bbox(t_bbox, self.anchors[head_idx], bbox_loss_fn=self.bbox_loss_fn)
+
+                # Calculate losses
+                bbox_losses += self.bbox_w * bbox_loss(p_bbox_decoded[target_cell], t_bbox[target_cell], bbox_loss_fn=self.bbox_loss_fn)
+                obj_losses += self.objectness_w * objectness_loss(p_obj[target_cell], ious * t_obj[target_cell], self.obj_scales_w[head_idx])
+                obj_losses += self.no_obj_w * no_obj_loss(p_obj[~target_cell], t_obj[~target_cell])
+ 
 
                 # Calculate prediction average precision 
                 if return_ap:
-                    ap = calculate_ap(filtered_p_bbox, filtered_p_obj, t_bbox)['map']
-                    batch_ap += (ap / len(outs))
+                    p_bbox_decoded, p_obj = self.__prepare_nms_preds(p_bbox_decoded, p_obj)
+                    batch_pred_bbox.append(p_bbox_decoded)
+                    batch_pred_obj.append(p_obj)
 
-            total_ap += batch_ap
 
-        bbox_losses = bbox_losses / batch_size    
-        obj_losses = obj_losses / batch_size
+            if return_ap:
+                batch_pred_bbox = torch.cat(batch_pred_bbox, dim=0)
+                batch_pred_obj = torch.cat(batch_pred_obj, dim=0)
+                nms_filter = nms(batch_pred_bbox, batch_pred_obj, 0.5)
+                total_ap += calculate_ap(batch_pred_bbox[nms_filter], batch_pred_obj[nms_filter], t_bbox)['map']
+
+        # Calculate final metrics
+        bbox_losses /= batch_size
+        obj_losses /= batch_size 
         total_loss = bbox_losses + obj_losses
         total_ap = total_ap / batch_size if return_ap else None
 
-        return total_loss, total_ap, bbox_losses, obj_losses
+        return total_loss, total_ap, bbox_losses, obj_losses    
 
-    def __scale_targets(self, targets, scale_factor, device):
-        scaled_targets = targets / scale_factor
-        return scaled_targets.to(device)
+    def __pred_bbox_decoding(self, pred_bboxes, head_anchors, bbox_loss_fn='mse'):
+        device = pred_bboxes.device
+
+        # Convert offsets back to coordinates
+        if bbox_loss_fn == 'mse':
+            pcx = pred_bboxes[..., 0].sigmoid() * 2 - 0.5
+            pcy = pred_bboxes[..., 1].sigmoid() * 2 - 0.5
+            pw = (pred_bboxes[..., 2].sigmoid() * 2) ** 2
+            ph = (pred_bboxes[..., 3].sigmoid() * 2) ** 2
+ 
+            pred_bbox_decoded = torch.stack([pcx, pcy, pw, ph], dim=-1)
+
+        elif bbox_loss_fn == 'ciou':
+            raise NotImplementedError("CIoU loss decoding is not implemented yet")
+            # Create grid coordinates
+            # TODO: add CIoU loss decoding configuration
+            # pred_shape = einops.parse_shape(pred_bboxes, 'n_anchors h w bbox')
+            # grid_x = torch.arange(pred_shape['w']).repeat(pred_shape['n_anchors'], pred_shape['h'], 1).to(device)
+            # grid_y = torch.arange(pred_shape['h']).repeat(pred_shape['n_anchors'], pred_shape['w'], 1).transpose(1, 2).to(device)
+            
+            # Get anchors_values
+            # anchor_w = einops.rearrange(head_anchors[:, 0], 'size -> size 1 1').to(device)
+            # anchor_h = einops.rearrange(head_anchors[:, 1], 'size -> size 1 1').to(device)
+
+        return pred_bbox_decoded
     
-    def __prepare_preds(self, pred_bboxes, pred_objs):
-        p_bbox = einops.rearrange(pred_bboxes, 'n_anchors h w bbox -> (n_anchors h w) bbox')
-        p_obj = einops.rearrange(pred_objs, 'n_anchors h w obj -> (n_anchors h w obj)')
+    def __prepare_nms_preds(self, pred_bboxes, pred_obj):
+        pred_bboxes = einops.rearrange(pred_bboxes, 'n_anchors h w bbox -> (n_anchors h w) bbox')
+        pred_obj = einops.rearrange(pred_obj, 'n_anchors h w obj -> (n_anchors h w obj)')
+        pred_bboxes = box_convert(pred_bboxes, in_fmt='cxcywh', out_fmt='xyxy')
 
-        p_bbox = box_convert(p_bbox, in_fmt='cxcywh', out_fmt='xyxy')
+        return pred_bboxes, pred_obj
+    
+    def __build_target_bbox(self, target_bboxes, head_anchors, bbox_loss_fn='mse'):
+        device = target_bboxes.device
 
-        return p_bbox, p_obj
+        if bbox_loss_fn == 'mse':
+            head_anchors = einops.rearrange(head_anchors, 'n_anchors wh -> n_anchors 1 1 wh').to(device)
 
-    def __scale_bbox_size(self, batch_size, h, w, bbox, anchors):
-        # Setup grid coordnates for offsets
-        device = bbox.device
-        grid_x = torch.arange(w).repeat(batch_size, len(anchors), w, 1).to(device)
-        grid_y = torch.arange(h).repeat(batch_size, len(anchors), h, 1).transpose(2, 3).to(device)
+            # normalize width and height to match prediction
+            target_bboxes[..., 2:] = torch.sqrt((1e-16 + target_bboxes[..., 2:]) / head_anchors) / 2
+        elif bbox_loss_fn == 'ciou':
+            raise NotImplementedError("CIoU loss decoding is not implemented yet")
 
-        # Setup anchor size
-        anchor_w = einops.rearrange(anchors[:, 0], 'size -> 1 size 1 1').to(device)
-        anchor_h = einops.rearrange(anchors[:, 1], 'size -> 1 size 1 1').to(device)
-
-        # Calculate bbox coordinates relative to grid
-        px = (bbox[..., 0] * 2 - 0.5) + grid_x
-        py = (bbox[..., 1] * 2 - 0.5) + grid_y
-        pw = ((bbox[..., 2] * 2) ** 2) * anchor_w
-        ph = ((bbox[..., 3] * 2) ** 2) * anchor_h
-        bbox = torch.stack([px, py, pw, ph], dim=-1)
-        
-        return bbox
+        return target_bboxes
 
 
 class BaseModel(pl.LightningModule):
