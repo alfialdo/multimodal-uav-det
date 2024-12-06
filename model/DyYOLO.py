@@ -4,7 +4,6 @@ import torch
 
 from ._base import BaseModel, YOLOHead, DyConvModule
 from dataset._helper import BatchData
-from fightingcv_attention.conv.DynamicConv import *
 
 ### BACKBONE ###
 

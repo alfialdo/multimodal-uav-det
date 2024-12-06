@@ -51,7 +51,6 @@ def train(config, train_loader, val_loader):
             limit_val_batches=trainer_cfg.val_batches,
             val_check_interval=trainer_cfg.val_check_interval,
             gradient_clip_val=trainer_cfg.grad_clip_val,
-            precision=trainer_cfg.precision,
             check_val_every_n_epoch=1
         )
 
@@ -62,6 +61,9 @@ if __name__ == "__main__":
 
     if config.train.seed:
         seed_everything(config.train.seed, workers=True)
+
+    # Set CUDA GPU matmul precision
+    torch.set_float32_matmul_precision(config.train.trainer.precision)
 
     train_loader, val_loader = load_dataloader(
         config.dataset.train_loader_path,

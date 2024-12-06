@@ -17,8 +17,8 @@ stages:
           batch_size: 4
           remote: false
           image_size:
-          - 416
-          - 416
+          - 640
+          - 640
           workers: 32
           mosaic: false
           format: yolo
@@ -49,31 +49,31 @@ stages:
     outs:
     - path: data/test_dataloader.pickle
       hash: md5
-      md5: d88ed50794b3be290ddaa2dd905e3067
-      size: 80057599
+      md5: 5bdac2bb4ce82ef711b22cc7fbe34d5c
+      size: 80057631
     - path: data/train_dataloader.pickle
       hash: md5
-      md5: 4cce691dbe51cd2dcb98a5aafe2d36f0
-      size: 142398439
+      md5: 2740167fe2fe596a04a6bcfb96fa82d0
+      size: 142398455
     - path: data/val_dataloader.pickle
       hash: md5
-      md5: eb1ee7bd703d511f624a8cc7f042b727
-      size: 57854635
+      md5: 81a0917c77f5e3c771f05176fce9dded
+      size: 57854667
   train:
     cmd: python train.py
     deps:
     - path: data/train_dataloader.pickle
       hash: md5
-      md5: 4cce691dbe51cd2dcb98a5aafe2d36f0
-      size: 142398439
+      md5: 2740167fe2fe596a04a6bcfb96fa82d0
+      size: 142398455
     - path: data/val_dataloader.pickle
       hash: md5
-      md5: eb1ee7bd703d511f624a8cc7f042b727
-      size: 57854635
+      md5: 81a0917c77f5e3c771f05176fce9dded
+      size: 57854667
     - path: train.py
       hash: md5
-      md5: fbed12ba317a21c1cf9214bf8d9cf72b
-      size: 2340
+      md5: b6a0f046fd86123f353c99c3c5d9136e
+      size: 2403
     params:
       params.yaml:
         dataset:
@@ -84,19 +84,118 @@ stages:
           batch_size: 4
           remote: false
           image_size:
-          - 416
-          - 416
+          - 640
+          - 640
           workers: 32
           mosaic: false
           format: yolo
+        model:
+          name: DyYOLO
+          hparams:
+            anchors:
+            - - - 29
+                - 23
+              - - 48
+                - 30
+              - - 67
+                - 38
+            - - - 91
+                - 54
+              - - 120
+                - 75
+              - - 157
+                - 60
+            - - - 199
+                - 73
+              - - 315
+                - 92
+              - - 268
+                - 182
+            head_scales:
+            - 32
+            - 16
+            - 8
+            lr: 0.0001
+            lr_scheduler: false
+            loss_balancing:
+              obj_scales_w:
+              - 0.5
+              - 1.0
+              - 2.0
+              bbox_w: 4.0
+              objectness_w: 1.0
+              no_obj_w: 4.0
+            bbox_loss_fn: mse
+            attn_temperature: 30.0
+            optim:
+              name: SGD
+              momentum: 0.7
+            layer_config:
+            - - 32
+              - 3
+              - 1
+            - - 64
+              - 3
+              - 2
+            - - B
+              - 1
+            - - 128
+              - 3
+              - 2
+            - - B
+              - 2
+            - - 256
+              - 3
+              - 2
+            - - B
+              - 8
+            - - 512
+              - 3
+              - 2
+            - - B
+              - 8
+            - - 1024
+              - 3
+              - 2
+            - - B
+              - 4
+            - - 512
+              - 1
+              - 1
+            - - 1024
+              - 3
+              - 1
+            - - S
+            - - 256
+              - 1
+              - 1
+            - - U
+            - - 256
+              - 1
+              - 1
+            - - 512
+              - 3
+              - 1
+            - - S
+            - - 128
+              - 1
+              - 1
+            - - U
+            - - 128
+              - 1
+              - 1
+            - - 256
+              - 3
+              - 1
+            - - S
         train:
           seed: 211
           trainer:
             epochs: 5
             input_size:
             - 3
-            - 416
-            - 416
+            - 640
+            - 640
             profiler:
             grad_batches: 2
             train_batches: 1.0
@@ -104,7 +203,7 @@ stages:
             val_check_interval: 1.0
             accelerator: gpu
             devices: 1
-            precision: 32
+            precision: medium
             grad_clip_val:
           checkpoint:
             dir: logs/checkpoints
@@ -113,11 +212,11 @@ stages:
     outs:
     - path: dvclive/plots
       hash: md5
-      md5: d751713988987e9331980363e24189ce.dir
-      size: 0
-      nfiles: 0
+      md5: f6b9bdf861b979dc71599ba78df56953.dir
+      size: 314996
+      nfiles: 7
     - path: logs/checkpoints
       hash: md5
-      md5: 44fff1b34efcee666b19569252dea021.dir
-      size: 89655172
+      md5: 62cff9c1dd7089f540ed455931ebdb51.dir
+      size: 1640445328
       nfiles: 2

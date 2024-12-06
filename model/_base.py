@@ -4,6 +4,7 @@ from torch import nn
 from typing import List
 import einops
 from torchvision.ops import box_convert, nms
+from torch.nn import functional as F
 
 from utils.datatype import BatchData, DetectionResults
 from utils.metrics import bbox_loss, objectness_loss, no_obj_loss, calculate_ap
@@ -23,47 +24,58 @@ class ConvModule(pl.LightningModule):
         return self.conv(x)
 
 class DyConvModule(pl.LightningModule):
-    def __init__(self, in_channels, out_channels, kernel_size=(3,3), stride=(1,1), padding=0, num_dy_conv=3):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=0, num_dy_conv=4):
         super().__init__()
+        self.num_dy_conv = num_dy_conv
+        self.stride = stride
+        self.padding = padding
+        self.out_channels = out_channels
+        self.kernel_size = kernel_size
 
-        hidden_features = max(1, in_channels//4)
+        # Attention for 2d input
+        # TODO: check ratio for channel reduction
+        if in_channels == 3:
+            hidden_channels = num_dy_conv
+        else:
+            hidden_channels = int(in_channels * 0.25) + 1
 
         self.attention = nn.Sequential(
             nn.AdaptiveAvgPool2d(1),
-            nn.Flatten(),
-            nn.Linear(in_features=in_channels, out_features=hidden_features),
+            nn.Conv2d(in_channels, hidden_channels, kernel_size=1, bias=False),
             nn.ReLU(inplace=True),
-            nn.Linear(in_features=hidden_features, out_features=num_dy_conv)
+            nn.Conv2d(hidden_channels, num_dy_conv, kernel_size=1, bias=True)
         )
 
-        self.dy_convs = nn.ModuleList([
-            nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=padding, stride=stride)
-            for _ in range(num_dy_conv)
-        ])
-
-        self.bn = nn.BatchNorm2d(num_features= out_channels, affine=True)
+        # Dynamic convolution for 2d input  
+        self.weights = nn.Parameter(torch.randn(num_dy_conv, out_channels, in_channels, kernel_size, kernel_size), requires_grad=True)
+        self.bn = nn.BatchNorm2d(num_features=out_channels, affine=True)
         self.silu = nn.SiLU(inplace=True)
-        self.attn_softmax = nn.Softmax(dim=-1)
 
     
     def forward(self, x, attn_temp):
-        attn_weights = self.attention(x)
-        attn_weights = self.attn_softmax(attn_weights / attn_temp)
-        outs = []
-
-        for i, dy_conv in enumerate(self.dy_convs):
-            # prepare weights for broadcasting
-            w = einops.rearrange(attn_weights[:, i], 'n -> n 1 1 1')
-
-            # scoring the convolution
-            x_weighted = torch.multiply(w, dy_conv(x))
-            outs.append(x_weighted)
         
-        outs = torch.sum(torch.stack(outs), dim=0)
-        outs = self.silu(self.bn(outs))
+        x_shape = einops.parse_shape(x, 'b c h w')
+        batch_size, in_channels = x_shape['b'], x_shape['c']
 
-        return outs
+        # Calculate attention scores
+        attn_scores = self.attention(x)
+        attn_scores = attn_scores.view(batch_size, -1)
+        attn_scores = F.softmax(attn_scores / attn_temp, 1)
 
+        # Aggregate weights
+        weights = self.weights.view(self.num_dy_conv, -1)
+        filters = torch.mm(attn_scores, weights)
+        filters = einops.rearrange(
+            filters, 'b (out_c in_c kh kw) -> (b out_c) in_c kh kw', 
+            out_c=self.out_channels, in_c=in_channels, kh=self.kernel_size, kw=self.kernel_size
+        )
+
+        x = einops.rearrange(x, 'b c h w -> 1 (b c) h w')
+        x = F.conv2d(x, filters, stride=self.stride, padding=self.padding, bias=None, groups=batch_size)
+        x = einops.rearrange(x, '1 (b c) h w -> b c h w', b=batch_size)
+        x = self.silu(self.bn(x))
+
+        return x
 
 
 class ObjectnessHead(pl.LightningModule):
