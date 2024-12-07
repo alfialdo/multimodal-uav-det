@@ -7,6 +7,8 @@ import pandas as pd
 import numpy as np
 import os
 import io
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
 
 from ._helper import load_json, load_attributes, connect_sftp, create_mosaic_4_img, calculate_anchor_iou
 from utils.test import generate_yolo_bboxes_test
@@ -52,7 +54,17 @@ class AntiUAVDataset(Dataset):
 
         # Apply necessary transforms to the image
         if self.transform:
-            results = self.transform(image=img, bboxes=bboxes, labels=labels)
+            if isinstance(self.transform, A.Compose):
+                tsfm = self.transform
+            else:
+                tsfm = A.Compose([
+                    A.Resize(self.input_size, self.input_size),
+                    A.Affine(scale=(0.8, 1.2), translate_percent=(-0.1, 0.1), rotate=(-30, 30), shear=(-15, 15), p=1),
+                    A.ToFloat(max_value=255.0), 
+                    ToTensorV2(),
+                ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['labels']))       
+
+            results = tsfm(image=img, bboxes=bboxes, labels=labels)
             img, bboxes = results['image'], torch.from_numpy(results['bboxes'])
         
         if self.format == 'yolo':

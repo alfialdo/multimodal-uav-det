@@ -17,16 +17,9 @@ def get_dataloader(dataset_cfg, train_cfg, seed):
     )
 
     # Create transform functions
-    train_tsfm = A.Compose([
-        A.Resize(img_w, img_h),
-        A.Affine(scale=(0.8, 1.2), translate_percent=(-0.1, 0.1), rotate=(-30, 30), shear=(-15, 15)),
-        A.ToFloat(max_value=255.0), 
-        ToTensorV2(),
-    ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['labels']))
-
     val_tsfm = A.Compose([
         A.Resize(img_w,img_h),
-        A.ToFloat(max_value=255.0), 
+        # A.ToFloat(max_value=255.0), 
         ToTensorV2(),
     ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['labels']))
 
@@ -35,7 +28,7 @@ def get_dataloader(dataset_cfg, train_cfg, seed):
     train_loader = create_dataloader(
         dir_path=os.path.join(dataset_cfg.root_dir, "train"),
         shuffle=True,
-        tsfm=train_tsfm,
+        tsfm=True,
         **common_args
     )
     print('Created train data loader..')

@@ -63,6 +63,9 @@ if __name__ == "__main__":
     if config.train.seed:
         seed_everything(config.train.seed, workers=True)
 
+    # Set CUDA GPU matmul precision
+    torch.set_float32_matmul_precision('high')
+
     train_loader, val_loader = load_dataloader(
         config.dataset.train_loader_path,
         config.dataset.val_loader_path
