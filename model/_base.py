@@ -4,6 +4,7 @@ from torch import nn
 from typing import List
 import einops
 from torchvision.ops import box_convert, nms
+from torch.nn import functional as F
 
 from utils.datatype import BatchData, DetectionResults
 from utils.metrics import bbox_loss, objectness_loss, no_obj_loss, calculate_ap
@@ -23,47 +24,57 @@ class ConvModule(pl.LightningModule):
         return self.conv(x)
 
 class DyConvModule(pl.LightningModule):
-    def __init__(self, in_channels, out_channels, kernel_size=(3,3), stride=(1,1), padding=0, num_dy_conv=3):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=0, num_dy_conv=4):
         super().__init__()
+        self.num_dy_conv = num_dy_conv
+        self.stride = stride
+        self.padding = padding
+        self.out_channels = out_channels
+        self.kernel_size = kernel_size
 
-        hidden_features = max(1, in_channels//4)
+        # Attention for 2d input
+        if in_channels == 3:
+            hidden_channels = num_dy_conv
+        else:
+            hidden_channels = int(in_channels * 0.25) + 1
 
         self.attention = nn.Sequential(
             nn.AdaptiveAvgPool2d(1),
-            nn.Flatten(),
-            nn.Linear(in_features=in_channels, out_features=hidden_features),
+            nn.Conv2d(in_channels, hidden_channels, kernel_size=1, bias=False),
             nn.ReLU(inplace=True),
-            nn.Linear(in_features=hidden_features, out_features=num_dy_conv)
+            nn.Conv2d(hidden_channels, num_dy_conv, kernel_size=1, bias=True)
         )
 
-        self.dy_convs = nn.ModuleList([
-            nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=padding, stride=stride)
-            for _ in range(num_dy_conv)
-        ])
-
-        self.bn = nn.BatchNorm2d(num_features= out_channels, affine=True)
+        # Dynamic convolution for 2d input  
+        self.weights = nn.Parameter(torch.randn(num_dy_conv, out_channels, in_channels, kernel_size, kernel_size), requires_grad=True)
+        self.bn = nn.BatchNorm2d(num_features=out_channels, affine=True)
         self.silu = nn.SiLU(inplace=True)
-        self.attn_softmax = nn.Softmax(dim=-1)
 
     
     def forward(self, x, attn_temp):
-        attn_weights = self.attention(x)
-        attn_weights = self.attn_softmax(attn_weights / attn_temp)
-        outs = []
-
-        for i, dy_conv in enumerate(self.dy_convs):
-            # prepare weights for broadcasting
-            w = einops.rearrange(attn_weights[:, i], 'n -> n 1 1 1')
-
-            # scoring the convolution
-            x_weighted = torch.multiply(w, dy_conv(x))
-            outs.append(x_weighted)
         
-        outs = torch.sum(torch.stack(outs), dim=0)
-        outs = self.silu(self.bn(outs))
+        x_shape = einops.parse_shape(x, 'b c h w')
+        batch_size, in_channels = x_shape['b'], x_shape['c']
 
-        return outs
+        # Calculate attention scores
+        attn_scores = self.attention(x)
+        attn_scores = attn_scores.view(batch_size, -1)
+        attn_scores = F.softmax(attn_scores / attn_temp, 1)
 
+        # Aggregate weights
+        weights = self.weights.view(self.num_dy_conv, -1)
+        filters = torch.mm(attn_scores, weights)
+        filters = einops.rearrange(
+            filters, 'b (out_c in_c kh kw) -> (b out_c) in_c kh kw', 
+            out_c=self.out_channels, in_c=in_channels, kh=self.kernel_size, kw=self.kernel_size
+        )
+
+        x = einops.rearrange(x, 'b c h w -> 1 (b c) h w')
+        x = F.conv2d(x, filters, stride=self.stride, padding=self.padding, bias=None, groups=batch_size)
+        x = einops.rearrange(x, '1 (b c) h w -> b c h w', b=batch_size)
+        x = self.silu(self.bn(x))
+
+        return x
 
 
 class ObjectnessHead(pl.LightningModule):
@@ -109,10 +120,11 @@ class BBoxHead(pl.LightningModule):
         return x
 
 class YOLOHead(pl.LightningModule)  :
-    def __init__(self, x_channels:List[int], anchors, loss_balancing, bbox_loss_fn='mse'):
+    def __init__(self, x_channels:List[int], anchors, head_scales, loss_balancing, bbox_loss_fn='mse'):
         super().__init__()
         # x_channels --> [x0_scale, x1_scale, x2_scale]
         self.anchors = torch.tensor(anchors).float()
+        self.head_scales = torch.tensor(head_scales)
         self.detection_head = nn.ModuleList()
         n_anchors = len(anchors[0])
 
@@ -154,6 +166,8 @@ class YOLOHead(pl.LightningModule)  :
 
             # Loop through each detection head
             for head_idx in range(len(outs)):
+                # scale anchors to head grid space
+                scaled_anchors = self.anchors[head_idx] / self.head_scales[head_idx]
 
                 # Get predictions and targets for current sample
                 p_bbox = outs[head_idx].bbox[i] # (n_anchors, h, w, 4)
@@ -168,22 +182,20 @@ class YOLOHead(pl.LightningModule)  :
 
 
                 # Decode predictions to head grid space and build target
-                p_bbox_decoded = self.__pred_bbox_decoding(p_bbox, self.anchors[head_idx], bbox_loss_fn=self.bbox_loss_fn)
-                ious = calculate_iou(p_bbox_decoded, t_bbox, self.anchors[head_idx], mask=target_cell)
-                t_bbox = self.__build_target_bbox(t_bbox, self.anchors[head_idx], bbox_loss_fn=self.bbox_loss_fn)
+                p_bbox_decoded = self.__pred_bbox_decoding(p_bbox, scaled_anchors)
+                ious = calculate_iou(p_bbox_decoded, t_bbox, scaled_anchors, mask=target_cell)
+                t_bbox = self.__build_target_bbox(t_bbox, scaled_anchors)
 
                 # Calculate losses
-                bbox_losses += self.bbox_w * bbox_loss(p_bbox_decoded[target_cell], t_bbox[target_cell], bbox_loss_fn=self.bbox_loss_fn)
+                bbox_losses += self.bbox_w * bbox_loss(p_bbox_decoded[target_cell], t_bbox[target_cell], scaled_anchors, bbox_loss_fn=self.bbox_loss_fn)
                 obj_losses += self.objectness_w * objectness_loss(p_obj[target_cell], ious * t_obj[target_cell], self.obj_scales_w[head_idx])
                 obj_losses += self.no_obj_w * no_obj_loss(p_obj[~target_cell], t_obj[~target_cell])
- 
 
                 # Calculate prediction average precision 
                 if return_ap:
                     p_bbox_decoded, p_obj = self.__prepare_nms_preds(p_bbox_decoded, p_obj)
                     batch_pred_bbox.append(p_bbox_decoded)
                     batch_pred_obj.append(p_obj)
-
 
             if return_ap:
                 batch_pred_bbox = torch.cat(batch_pred_bbox, dim=0)
@@ -199,29 +211,32 @@ class YOLOHead(pl.LightningModule)  :
 
         return total_loss, total_ap, bbox_losses, obj_losses    
 
-    def __pred_bbox_decoding(self, pred_bboxes, head_anchors, bbox_loss_fn='mse'):
+    def __pred_bbox_decoding(self, pred_bboxes, head_anchors):
         device = pred_bboxes.device
 
         # Convert offsets back to coordinates
-        if bbox_loss_fn == 'mse':
-            pcx = pred_bboxes[..., 0].sigmoid() * 2 - 0.5
-            pcy = pred_bboxes[..., 1].sigmoid() * 2 - 0.5
-            pw = (pred_bboxes[..., 2].sigmoid() * 2) ** 2
-            ph = (pred_bboxes[..., 3].sigmoid() * 2) ** 2
- 
-            pred_bbox_decoded = torch.stack([pcx, pcy, pw, ph], dim=-1)
+        pcx = pred_bboxes[..., 0].sigmoid() * 2 - 0.5
+        pcy = pred_bboxes[..., 1].sigmoid() * 2 - 0.5
+        pw = (pred_bboxes[..., 2].sigmoid() * 2) ** 2
+        ph = (pred_bboxes[..., 3].sigmoid() * 2) ** 2
 
-        elif bbox_loss_fn == 'ciou':
-            raise NotImplementedError("CIoU loss decoding is not implemented yet")
-            # Create grid coordinates
-            # TODO: add CIoU loss decoding configuration
-            # pred_shape = einops.parse_shape(pred_bboxes, 'n_anchors h w bbox')
-            # grid_x = torch.arange(pred_shape['w']).repeat(pred_shape['n_anchors'], pred_shape['h'], 1).to(device)
-            # grid_y = torch.arange(pred_shape['h']).repeat(pred_shape['n_anchors'], pred_shape['w'], 1).transpose(1, 2).to(device)
+        # Create grid coordinates
+        if self.bbox_loss_fn == 'ciou':
+            pred_shape = einops.parse_shape(pred_bboxes, 'n_anchors h w bbox')
+            grid_x = torch.arange(pred_shape['w']).repeat(pred_shape['n_anchors'], pred_shape['h'], 1).to(device)
+            grid_y = torch.arange(pred_shape['h']).repeat(pred_shape['n_anchors'], pred_shape['w'], 1).transpose(1, 2).to(device)
             
             # Get anchors_values
-            # anchor_w = einops.rearrange(head_anchors[:, 0], 'size -> size 1 1').to(device)
-            # anchor_h = einops.rearrange(head_anchors[:, 1], 'size -> size 1 1').to(device)
+            anchor_w = einops.rearrange(head_anchors[:, 0], 'size -> size 1 1').to(device)
+            anchor_h = einops.rearrange(head_anchors[:, 1], 'size -> size 1 1').to(device)
+
+            # Add grid coordinates and anchors to get final coordinates
+            pcx = pcx + grid_x
+            pcy = pcy + grid_y
+            pw = pw * anchor_w
+            ph = ph * anchor_h
+
+        pred_bbox_decoded = torch.stack([pcx, pcy, pw, ph], dim=-1)
 
         return pred_bbox_decoded
     
@@ -232,16 +247,25 @@ class YOLOHead(pl.LightningModule)  :
 
         return pred_bboxes, pred_obj
     
-    def __build_target_bbox(self, target_bboxes, head_anchors, bbox_loss_fn='mse'):
+    def __build_target_bbox(self, target_bboxes, head_anchors):
         device = target_bboxes.device
 
-        if bbox_loss_fn == 'mse':
+        if self.bbox_loss_fn == 'mse':
             head_anchors = einops.rearrange(head_anchors, 'n_anchors wh -> n_anchors 1 1 wh').to(device)
 
             # normalize width and height to match prediction
             target_bboxes[..., 2:] = torch.sqrt((1e-16 + target_bboxes[..., 2:]) / head_anchors) / 2
-        elif bbox_loss_fn == 'ciou':
-            raise NotImplementedError("CIoU loss decoding is not implemented yet")
+
+        elif self.bbox_loss_fn == 'ciou':
+            # Create grid coordinates
+            target_shape = einops.parse_shape(target_bboxes, 'n_anchors h w bbox')
+            grid_x = torch.arange(target_shape['w']).repeat(target_shape['n_anchors'], target_shape['h'], 1).to(device)
+            grid_y = torch.arange(target_shape['h']).repeat(target_shape['n_anchors'], target_shape['w'], 1).transpose(1, 2).to(device)
+            
+            # Add grid coordinates to get final coordinates
+            target_bboxes[..., 0] = target_bboxes[..., 0] + grid_x  # Add grid x to cx
+            target_bboxes[..., 1] = target_bboxes[..., 1] + grid_y  # Add grid y to cy
+            
 
         return target_bboxes
 

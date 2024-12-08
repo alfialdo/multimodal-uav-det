@@ -45,7 +45,7 @@ def draw_bbox(image, bbox, color=(0, 255, 0), thickness=2, label=None, format='x
     return image
 
 
-def calculate_iou(preds, targets, anchors, mask=None):
+def calculate_iou(preds, targets, head_anchors, mask=None):
     """Calculate IoU between predicted and target bounding boxes in grid cell format
     
     Args:
@@ -59,22 +59,23 @@ def calculate_iou(preds, targets, anchors, mask=None):
     # Scale preds width and height to grid cell size
     # Reshape anchors to match prediction shape for broadcasting
     device = preds.device
-    anchors = einops.repeat(anchors, 'n_anchors wh -> n_anchors 1 1 wh').to(device)
-    preds[..., 2:] *= anchors
+    anchors = einops.repeat(head_anchors, 'n_anchors wh -> n_anchors 1 1 wh').to(device)
+    pred_bboxes = preds.detach().clone()
+    # pred_bboxes[..., 2:] = pred_bboxes[..., 2:] * anchors
 
     # Convert bbox format from cxcywh to xyxy
     if mask is not None:
-        preds = preds[mask]
+        pred_bboxes = pred_bboxes[mask]
         targets = targets[mask]
     else:
-        preds = einops.rearrange(preds, 'n_anchors h w bbox -> (n_anchors h w) bbox')
+        pred_bboxes = einops.rearrange(pred_bboxes, 'n_anchors h w bbox -> (n_anchors h w) bbox')
         targets = einops.rearrange(targets, 'n_anchors h w bbox -> (n_anchors h w) bbox')
 
-    preds = box_convert(preds, in_fmt='cxcywh', out_fmt='xyxy')
+    pred_bboxes = box_convert(pred_bboxes, in_fmt='cxcywh', out_fmt='xyxy')
     targets = box_convert(targets, in_fmt='cxcywh', out_fmt='xyxy')
 
     # Calculate IoU
-    ious = box_iou(preds, targets)
+    ious = box_iou(pred_bboxes, targets)
 
     return ious[:,0]
 

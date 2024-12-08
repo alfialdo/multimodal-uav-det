@@ -3,8 +3,9 @@ import torch
 from torchvision.ops import complete_box_iou_loss, box_convert
 from torchmetrics.detection import MeanAveragePrecision
 import torch.nn.functional as F
+import einops
 
-def bbox_loss(preds_decoded, targets, bbox_loss_fn='mse'):
+def bbox_loss(preds_decoded, targets, head_anchors, bbox_loss_fn='mse'):
     """
     Calculate the complete IoU loss between predicted and target bounding boxes.
     
@@ -20,6 +21,8 @@ def bbox_loss(preds_decoded, targets, bbox_loss_fn='mse'):
     Returns:
         torch.Tensor: Complete IoU loss value between matched predictions and targets
     """ 
+    device = preds_decoded.device
+
     if bbox_loss_fn == 'mse':
         bbox_loss = F.mse_loss(preds_decoded, targets, reduction='mean')
 
@@ -27,7 +30,6 @@ def bbox_loss(preds_decoded, targets, bbox_loss_fn='mse'):
         # Convert format cxcywh to xyxy
         preds_decoded = box_convert(preds_decoded, in_fmt='cxcywh', out_fmt='xyxy')
         targets = box_convert(targets, in_fmt='cxcywh', out_fmt='xyxy')    
-
 
         # Calculate complete IoU loss between pred-target pairs, reduction use to get scalar value
         bbox_loss = complete_box_iou_loss(preds_decoded, targets, reduction='mean')

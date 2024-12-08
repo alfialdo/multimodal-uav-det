@@ -19,7 +19,7 @@ def get_dataloader(dataset_cfg, train_cfg, seed):
     # Create transform functions
     val_tsfm = A.Compose([
         A.Resize(img_w,img_h),
-        # A.ToFloat(max_value=255.0), 
+        A.ToFloat(max_value=255.0), 
         ToTensorV2(),
     ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['labels']))
 
