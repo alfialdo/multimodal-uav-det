@@ -22,7 +22,7 @@ dataset:
 train:
   seed: 211
   trainer:
-    epochs: 5
+    epochs: 2
     input_size: [3, 640, 640]
     profiler: null
     grad_batches: 2

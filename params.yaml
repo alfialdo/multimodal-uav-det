@@ -6,19 +6,19 @@ dataset:
   batch_size: 4
   remote: false
   image_size:
-  - 416
-  - 416
+  - 640
+  - 640
   workers: 32
   mosaic: false
   format: yolo
 train:
   seed: 211
   trainer:
-    epochs: 5
+    epochs: 2
     input_size:
     - 3
-    - 416
-    - 416
+    - 640
+    - 640
     profiler: null
     grad_batches: 2
     train_batches: 1.0
@@ -26,7 +26,7 @@ train:
     val_check_interval: 1.0
     accelerator: gpu
     devices: 1
-    precision: 32
+    precision: 16
     grad_clip_val: null
   checkpoint:
     dir: logs/checkpoints
@@ -36,24 +36,24 @@ model:
   name: baseline
   hparams:
     anchors:
-    - - - 29
-        - 23
-      - - 48
-        - 30
-      - - 67
-        - 38
-    - - - 91
-        - 54
-      - - 120
-        - 75
-      - - 157
-        - 60
     - - - 199
         - 73
       - - 315
         - 92
       - - 268
         - 182
+    - - - 91
+        - 54
+      - - 120
+        - 75
+      - - 157
+        - 60
+    - - - 29
+        - 23
+      - - 48
+        - 30
+      - - 67
+        - 38
     head_scales:
     - 32
     - 16
@@ -68,7 +68,7 @@ model:
       bbox_w: 4.0
       objectness_w: 1.0
       no_obj_w: 4.0
-    bbox_loss_fn: mse
+    bbox_loss_fn: ciou
     optim:
       name: SGD
       momentum: 0.7

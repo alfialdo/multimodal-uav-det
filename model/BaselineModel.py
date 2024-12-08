@@ -100,7 +100,7 @@ class BaselineModel(BaseModel):
                 )
                 in_channels = out_channels
         
-        self.yolo_head = YOLOHead(x_out_channels, hparams.anchors, hparams.loss_balancing, hparams.bbox_loss_fn)
+        self.yolo_head = YOLOHead(x_out_channels, hparams.anchors, hparams.head_scales, hparams.loss_balancing, hparams.bbox_loss_fn)
 
     def forward(self, x):
         outs = []
