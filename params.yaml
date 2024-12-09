@@ -33,7 +33,7 @@ train:
     monitor: val_loss
     mode: min
 model:
-  name: baseline
+  name: DyYOLO
   hparams:
     anchors:
     - - - 199
@@ -68,15 +68,18 @@ model:
       bbox_w: 4.0
       objectness_w: 1.0
       no_obj_w: 4.0
-    bbox_loss_fn: ciou
+    bbox_loss_fn: mse
+    attn_temperature: 30.0
     optim:
       name: SGD
-      momentum: 0.7
+      momentum: 0.78
     layer_config:
-    - - 32
+    - - DyConv
+      - 32
       - 3
       - 1
-    - - 64
+    - - DyConv
+      - 64
       - 3
       - 2
     - - B
@@ -101,7 +104,8 @@ model:
       - 2
     - - B
       - 4
-    - - 512
+    - - DyConv
+      - 512
       - 1
       - 1
     - - 1024
@@ -112,7 +116,8 @@ model:
       - 1
       - 1
     - - U
-    - - 256
+    - - DyConv
+      - 256
       - 1
       - 1
     - - 512
@@ -123,7 +128,8 @@ model:
       - 1
       - 1
     - - U
-    - - 128
+    - - DyConv
+      - 128
       - 1
       - 1
     - - 256

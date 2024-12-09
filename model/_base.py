@@ -183,7 +183,7 @@ class YOLOHead(pl.LightningModule)  :
 
                 # Decode predictions to head grid space and build target
                 p_bbox_decoded = self.__pred_bbox_decoding(p_bbox, scaled_anchors)
-                ious = calculate_iou(p_bbox_decoded, t_bbox, scaled_anchors, mask=target_cell)
+                ious = calculate_iou(p_bbox_decoded, t_bbox, scaled_anchors, mask=target_cell, bbox_loss_fn=self.bbox_loss_fn)
                 t_bbox = self.__build_target_bbox(t_bbox, scaled_anchors)
 
                 # Calculate losses

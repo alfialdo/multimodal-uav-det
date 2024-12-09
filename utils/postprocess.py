@@ -45,7 +45,7 @@ def draw_bbox(image, bbox, color=(0, 255, 0), thickness=2, label=None, format='x
     return image
 
 
-def calculate_iou(preds, targets, head_anchors, mask=None):
+def calculate_iou(preds, targets, head_anchors, mask=None, bbox_loss_fn='mse'):
     """Calculate IoU between predicted and target bounding boxes in grid cell format
     
     Args:
@@ -61,7 +61,9 @@ def calculate_iou(preds, targets, head_anchors, mask=None):
     device = preds.device
     anchors = einops.repeat(head_anchors, 'n_anchors wh -> n_anchors 1 1 wh').to(device)
     pred_bboxes = preds.detach().clone()
-    # pred_bboxes[..., 2:] = pred_bboxes[..., 2:] * anchors
+
+    if bbox_loss_fn == 'mse':
+        pred_bboxes[..., 2:] = pred_bboxes[..., 2:] * anchors
 
     # Convert bbox format from cxcywh to xyxy
     if mask is not None:

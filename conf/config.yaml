@@ -5,7 +5,7 @@ hydra:
 
 defaults:
   - _self_
-  - model: baseline
+  - model: dy-yolo
 
 dataset:
   root_dir: /home/aldo/opt/dataset/Anti-UAV-RGBT

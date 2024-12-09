@@ -4,7 +4,6 @@ import torch
 
 from ._base import BaseModel, YOLOHead, DyConvModule
 from dataset._helper import BatchData
-from fightingcv_attention.conv.DynamicConv import *
 
 ### BACKBONE ###
 
@@ -87,9 +86,8 @@ class DyYOLO(BaseModel):
                     nn.Upsample(scale_factor=2),
                 )
                 in_channels = in_channels * 3
-
-            else:
-                out_channels, kernel_size, stride = module
+            elif module[0] == "DyConv":
+                out_channels, kernel_size, stride = module[1:]
                 self.layers.append(
                     DyConvModule(
                         in_channels,
@@ -100,8 +98,26 @@ class DyYOLO(BaseModel):
                     )
                 )
                 in_channels = out_channels
+            else:
+                out_channels, kernel_size, stride = module
+                self.layers.append(
+                    CNNBlock(
+                        in_channels,
+                        out_channels,
+                        kernel_size=kernel_size,
+                        stride=stride,
+                        padding=1 if kernel_size == 3 else 0,
+                    )
+                )
+                in_channels = out_channels
         
-        self.yolo_head = YOLOHead(x_out_channels, hparams.anchors, hparams.loss_balancing, hparams.bbox_loss_fn)
+        self.yolo_head = YOLOHead(
+            x_out_channels, 
+            hparams.anchors, 
+            hparams.head_scales, 
+            hparams.loss_balancing, 
+            hparams.bbox_loss_fn
+        )
 
     def forward(self, x):
         outs = []

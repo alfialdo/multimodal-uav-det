@@ -22,6 +22,7 @@ stages:
     params:
     - dataset
     - train
+    - model
     outs:
     - dvclive/plots
     - logs/checkpoints
